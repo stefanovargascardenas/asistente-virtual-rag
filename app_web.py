@@ -16,19 +16,26 @@ st.set_page_config(
 st.title("⚡ Copiloto de Ventas en Vivo")
 st.caption("Escribe la objeción o consulta rápida para obtener el guion exacto.")
 
-# Carga de API Key desde Secretos o variables de entorno
+# Carga de API Key
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini. Configúrala en Streamlit Secrets.")
     st.stop()
 
-# Cargar componentes RAG optimizados con caché
+# Cargar componentes RAG optimizados
 @st.cache_resource(show_spinner=False)
-def cargar_vectorstore_y_prompt():
+def cargar_componentes():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+
+    # Modelo directo y liviano
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-flash-latest",
+        google_api_key=api_key,
+        temperature=0.1
+    )
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
@@ -45,23 +52,11 @@ Contexto disponible:
         ("human", "{input}")
     ])
 
-    return retriever, prompt
+    return retriever, prompt, llm
 
-retriever, prompt = cargar_vectorstore_y_prompt()
+retriever, prompt, llm = cargar_componentes()
 
-# Función para instanciar el modelo con respaldo de versión
-@st.cache_resource(show_spinner=False)
-def obtener_llm(key: str):
-    # Intentamos primero con gemini-2.0-flash (estándar actual en la SDK google-genai)
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        google_api_key=key,
-        temperature=0.1
-    )
-
-llm = obtener_llm(api_key)
-
-# Historial de conversación en la interfaz
+# Historial de conversación
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -69,7 +64,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Entrada de usuario y ejecución de la respuesta
+# Entrada de usuario y ejecución
 if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -77,22 +72,11 @@ if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profeso
 
     with st.chat_message("assistant"):
         with st.spinner("Buscando guion..."):
-            # 1. Recuperación de contexto
             docs = retriever.invoke(user_input)
             contexto = "\n\n".join([doc.page_content for doc in docs])
 
-            # 2. Generación mediante LCEL
-            try:
-                chain = prompt | llm | StrOutputParser()
-                respuesta_texto = chain.invoke({"context": contexto, "input": user_input})
-            except Exception as e:
-                # Si gemini-2.0-flash tuviera algún inconveniente de permisos, intenta con el alias genérico
-                if "NotFoundError" in type(e).__name__ or "NotFound" in str(e):
-                    alt_llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", google_api_key=api_key, temperature=0.1)
-                    chain = prompt | alt_llm | StrOutputParser()
-                    respuesta_texto = chain.invoke({"context": contexto, "input": user_input})
-                else:
-                    raise e
+            chain = prompt | llm | StrOutputParser()
+            respuesta_texto = chain.invoke({"context": contexto, "input": user_input})
 
             st.write(respuesta_texto)
 
