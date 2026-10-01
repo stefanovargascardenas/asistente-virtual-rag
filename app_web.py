@@ -9,8 +9,9 @@ from langchain_core.output_parsers import StrOutputParser
 
 FAQ_FILE = "faqs.json"
 
-# --- FUNCIONES DE FAQs ---
+# --- FUNCIONES PARA GESTIONAR LAS PREGUNTAS FRECUENTES (FAQs) ---
 def cargar_faqs():
+    """Carga el contador de preguntas desde session_state o archivo local."""
     if "faqs_data" in st.session_state:
         return st.session_state.faqs_data
     
@@ -32,6 +33,7 @@ def cargar_faqs():
     return faqs_iniciales
 
 def registrar_consulta(query: str):
+    """Incrementa la frecuencia de la consulta en el registro."""
     query_norm = query.strip().lower()
     if len(query_norm) < 2:
         return
@@ -46,6 +48,7 @@ def registrar_consulta(query: str):
         pass
 
 def obtener_top_faqs(limite=4):
+    """Devuelve las preguntas más frecuentes ordenadas por repetición."""
     faqs = cargar_faqs()
     faqs_ordenadas = sorted(faqs.items(), key=lambda x: x[1], reverse=True)
     return [item[0] for item in faqs_ordenadas[:limite]]
@@ -60,41 +63,38 @@ st.set_page_config(
 st.title("⚡ Copiloto de Ventas en Vivo")
 st.caption("Escribe la objeción o haz clic en las preguntas más frecuentes.")
 
+# Carga de API Key desde Streamlit Secrets o Variables de Entorno
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
+# --- CARGA DE COMPONENTES RAG Y MODELOS ESTABLES ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Cadena de modelos con respaldo para prevenir caídas por agotamiento de cuota (429)
+    # Modelo principal oficial con cuota gratuita alta (1,000 peticiones/día)
     llm_principal = ChatGoogleGenerativeAI(
-        model="gemini-3.8-flash",
-        api_key=api_key,
+        model="gemini-1.5-flash",
+        google_api_key=api_key,
         temperature=0.1,
         streaming=True
     )
     
-    llm_respaldo_1 = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        api_key=api_key,
-        temperature=0.1,
-        streaming=True
-    )
-
-    llm_respaldo_2 = ChatGoogleGenerativeAI(
+    # Modelo de respaldo en caso de saturación momentánea
+    llm_respaldo = ChatGoogleGenerativeAI(
         model="gemini-1.5-flash-8b",
-        api_key=api_key,
+        google_api_key=api_key,
         temperature=0.1,
         streaming=True
     )
 
-    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1, llm_respaldo_2])
+    # Encadenamiento con fallbacks automáticos
+    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo])
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
@@ -115,7 +115,7 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
-# --- GENERADOR DE STREAMING CON CAPTURA DE ERRORES ---
+# --- GENERADOR DE STREAMING CON ESCUDO DE ERRORES ---
 def stream_con_respaldo(chain, inputs):
     try:
         for chunk in chain.stream(inputs):
@@ -123,11 +123,11 @@ def stream_con_respaldo(chain, inputs):
     except Exception as e:
         err_str = str(e)
         if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            yield "⚠️ Se alcanzó el límite de consultas gratuitas de la API de Google por el momento. Espera 1 minuto antes de volver a realizar una pregunta."
+            yield "⚠️ Se alcanzó el límite de consultas por minuto. Por favor, espera unos segundos e intenta nuevamente."
         else:
-            yield f"⚠️ Error en Google API: {err_str}"
+            yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
 
-# --- INTERFAZ DE USUARIO ---
+# --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO (TOP PREGUNTAS) ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
 top_preguntas = obtener_top_faqs(limite=4)
 
@@ -139,6 +139,7 @@ for idx, preg in enumerate(top_preguntas):
 
 st.divider()
 
+# Historial de conversación
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -146,6 +147,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
+# Capturar entrada por texto o por botón FAQ
 chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos...")
 query_final = chat_input_val or faq_seleccionada
 
