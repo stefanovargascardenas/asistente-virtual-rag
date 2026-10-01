@@ -4,8 +4,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.output_parsers import StrOutputParser
 
 st.set_page_config(
     page_title="Copiloto de Ventas - Premium English",
@@ -23,7 +22,7 @@ if not api_key:
     st.stop()
 
 @st.cache_resource
-def iniciar_cadena_rag():
+def cargar_componentes():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
@@ -38,7 +37,7 @@ def iniciar_cadena_rag():
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas estrictas de respuesta:
+Reglas strictly de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
@@ -49,10 +48,9 @@ Contexto disponible:
         ("human", "{input}")
     ])
 
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    return create_retrieval_chain(retriever, question_answer_chain)
+    return retriever, prompt, llm
 
-rag_chain = iniciar_cadena_rag()
+retriever, prompt, llm = cargar_componentes()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -68,8 +66,14 @@ if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profeso
 
     with st.chat_message("assistant"):
         with st.spinner("Buscando guion..."):
-            response = rag_chain.invoke({"input": user_input})
-            respuesta_texto = response["answer"]
+            # 1. Obtener documentos relevantes
+            docs = retriever.invoke(user_input)
+            contexto = "\n\n".join([doc.page_content for doc in docs])
+
+            # 2. Ejecutar cadena LCEL
+            chain = prompt | llm | StrOutputParser()
+            respuesta_texto = chain.invoke({"context": contexto, "input": user_input})
+
             st.write(respuesta_texto)
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
