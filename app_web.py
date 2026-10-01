@@ -72,9 +72,9 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo oficial para respuesta rápida y streaming continuo
+    # Modelo gemini-3.8-flash para respuesta rápida y streaming
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model="gemini-3.8-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -107,7 +107,7 @@ def stream_con_respaldo(chain, inputs):
     except Exception as e_stream:
         try:
             llm_no_stream = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-3.8-flash",
                 api_key=api_key,
                 temperature=0.1,
                 streaming=False
