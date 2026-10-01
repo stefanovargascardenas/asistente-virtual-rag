@@ -1,5 +1,7 @@
 import os
+import shutil
 import streamlit as st
+from collections import Counter
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -16,12 +18,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# Inicializar estado para el feedback y analítica si no existe
+# Inicializar estados en la sesión si no existen
 if "feedback_data" not in st.session_state:
     st.session_state.feedback_data = []
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "query_history" not in st.session_state:
+    st.session_state.query_history = []  # Para registrar todas las preguntas hechas
 
 # 1. Carga de VectorStore y Modelos (Caché de Streamlit)
 @st.cache_resource
@@ -31,11 +36,19 @@ def init_rag_system():
         st.error("Error: NO se encontró la variable GOOGLE_API_KEY en el entorno o en el archivo .env.")
         st.stop()
         
-    # Usar embeddings locales con HuggingFace para evitar errores 404 de la API de Google Embeddings
+    # Usar embeddings locales con HuggingFace (dimensión 384)
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
+    # Manejo de incompatibilidad de dimensiones previa en Chroma:
+    db_dir = "./chroma_db"
+    if os.path.exists(db_dir):
+        try:
+            temp_check = Chroma(persist_directory=db_dir, embedding_function=embeddings)
+        except Exception:
+            shutil.rmtree(db_dir)
+            
     vectorstore = Chroma(
-        persist_directory="./chroma_db",
+        persist_directory=db_dir,
         embedding_function=embeddings
     )
     
@@ -75,7 +88,6 @@ prompt = ChatPromptTemplate.from_template(template)
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-# Cadena RAG usando LangChain Expression Language (LCEL)
 chain = (
     {"context": retriever | format_docs, "question": RunnablePassthrough()}
     | prompt
@@ -91,20 +103,35 @@ st.write("Pregúntame sobre tus documentos y te responderé con base en la infor
 tab_chat, tab_dashboard = st.tabs(["💬 Chat Asistente", "📊 Dashboard y Analítica"])
 
 with tab_chat:
-    # ── Preguntas Rápidas (Botones superiores) ──────────────────
-    st.markdown("### 💡 Preguntas frecuentes")
-    col_q1, col_q2, col_q3 = st.columns(3)
+    # ── Sección Dinámica: Preguntas Más Frecuentes de los Asesores ──────────────────
+    st.markdown("### 💡 Preguntas más frecuentes (Detectadas automáticamente)")
     
+    # Preguntas predeterminadas iniciales por si la sesión recién empieza
+    default_frequent_queries = [
+        "¿Qué duda o requerimiento tiene el cliente?",
+        "¿Cuáles son los detalles sobre BCP y pagos?",
+        "¿De qué trata el servicio de asesoría?",
+        "Haz un resumen general de los documentos."
+    ]
+    
+    # Combinar historial real de la sesión con las predeterminadas para calcular frecuencias
+    all_recorded_queries = st.session_state.query_history + default_frequent_queries
+    query_counts = Counter(all_recorded_queries)
+    
+    # Obtener las 4 preguntas más comunes ordenadas de mayor a menor frecuencia
+    top_frequent = query_counts.most_common(4)
+    
+    # Renderizar botones dinámicos con el contador al costado
+    col_q1, col_q2 = st.columns(2)
     quick_query = None
-    with col_q1:
-        if st.button("📞 ¿Qué duda tiene el cliente?"):
-            quick_query = "¿Qué duda o requerimiento tiene el cliente?"
-    with col_q2:
-        if st.button("🏦 Información sobre BCP"):
-            quick_query = "¿Cuáles son los detalles sobre BCP?"
-    with col_q3:
-        if st.button("📋 Resumen de documentos"):
-            quick_query = "Haz un resumen general de los documentos disponibles."
+    
+    for i, (q_text, count) in enumerate(top_frequent):
+        button_label = f"{q_text} ({count})"
+        target_col = col_q1 if i % 2 == 0 else col_q2
+        
+        with target_col:
+            if st.button(button_label, key=f"freq_btn_{i}"):
+                quick_query = q_text
 
     st.divider()
 
@@ -113,14 +140,15 @@ with tab_chat:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Capturar entrada por chat o por botón rápido
     user_input = st.chat_input("Escribe tu pregunta aquí...")
     
-    # Si se hizo clic en una pregunta rápida, la procesamos como entrada de usuario
     if quick_query:
         user_input = quick_query
 
     if user_input:
+        # Registrar la consulta en el historial para actualizar los contadores
+        st.session_state.query_history.append(user_input)
+        
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
@@ -145,7 +173,6 @@ with tab_chat:
                         response = full_response
                         
                     st.session_state.messages.append({"role": "assistant", "content": response})
-                    
                     st.session_state.last_query = user_input
                     st.session_state.last_response = response
                     
