@@ -12,20 +12,26 @@ FAQ_FILE = "faqs.json"
 
 # --- FUNCIONES PARA GESTIONAR LAS PREGUNTAS FRECUENTES (FAQs) ---
 def cargar_faqs():
-    """Carga el contador de preguntas o inicializa valores por defecto."""
-    if os.path.exists(FAQ_FILE):
-        try:
-            with open(FAQ_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    # Valores por defecto iniciales
-    return {
+    """Carga el contador de preguntas desde session_state o archivo local."""
+    if "faqs_data" in st.session_state:
+        return st.session_state.faqs_data
+    
+    faqs_iniciales = {
         "cuenta bcp": 10,
         "caro": 8,
         "profesores nativos": 6,
         "no escuché antes": 4
     }
+    
+    if os.path.exists(FAQ_FILE):
+        try:
+            with open(FAQ_FILE, "r", encoding="utf-8") as f:
+                faqs_iniciales = json.load(f)
+        except Exception:
+            pass
+            
+    st.session_state.faqs_data = faqs_iniciales
+    return faqs_iniciales
 
 def registrar_consulta(query: str):
     """Incrementa la frecuencia de la consulta en el registro."""
@@ -34,6 +40,8 @@ def registrar_consulta(query: str):
         return
     faqs = cargar_faqs()
     faqs[query_norm] = faqs.get(query_norm, 0) + 1
+    st.session_state.faqs_data = faqs
+    
     try:
         with open(FAQ_FILE, "w", encoding="utf-8") as f:
             json.dump(faqs, f, ensure_ascii=False, indent=2)
@@ -43,7 +51,6 @@ def registrar_consulta(query: str):
 def obtener_top_faqs(limite=4):
     """Devuelve las preguntas más frecuentes ordenadas por repetición."""
     faqs = cargar_faqs()
-    # Ordenar de mayor a menor frecuencia
     faqs_ordenadas = sorted(faqs.items(), key=lambda x: x[1], reverse=True)
     return [item[0] for item in faqs_ordenadas[:limite]]
 
@@ -72,7 +79,7 @@ def cargar_componentes():
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-flash-latest",
+        model="gemini-2.0-flash",
         google_api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -82,7 +89,7 @@ def cargar_componentes():
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas estrictas de respuesta:
+Reglas strictly directas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
@@ -104,7 +111,6 @@ top_preguntas = obtener_top_faqs(limite=4)
 faq_seleccionada = None
 cols = st.columns(len(top_preguntas))
 for idx, preg in enumerate(top_preguntas):
-    # Crear un botón rápido por cada pregunta del Top
     if cols[idx].button(f"📌 {preg.capitalize()}", use_container_width=True, key=f"btn_faq_{idx}"):
         faq_seleccionada = preg
 
@@ -123,7 +129,6 @@ chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profeso
 query_final = chat_input_val or faq_seleccionada
 
 if query_final:
-    # Registrar la pregunta para actualizar el contador de frecuencia
     registrar_consulta(query_final)
 
     st.session_state.messages.append({"role": "user", "content": query_final})
@@ -131,12 +136,23 @@ if query_final:
         st.write(query_final)
 
     with st.chat_message("assistant"):
-        # 1. Búsqueda vectorial
         docs = retriever.invoke(query_final)
         contexto = "\n\n".join([doc.page_content for doc in docs])
 
-        # 2. Generación en streaming
         chain = prompt | llm | StrOutputParser()
-        respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": query_final}))
+
+        # Intento con streaming y respaldo en caso de ServerError
+        try:
+            respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": query_final}))
+        except Exception:
+            with st.spinner("Obteniendo guion..."):
+                llm_backup = ChatGoogleGenerativeAI(
+                    model="gemini-flash-latest",
+                    google_api_key=api_key,
+                    temperature=0.1
+                )
+                chain_backup = prompt | llm_backup | StrOutputParser()
+                respuesta_texto = chain_backup.invoke({"context": contexto, "input": query_final})
+                st.write(respuesta_texto)
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
