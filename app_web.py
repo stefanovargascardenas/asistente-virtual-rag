@@ -72,13 +72,29 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo gemini-3.8-flash para respuesta rápida y streaming
-    llm = ChatGoogleGenerativeAI(
+    # Cadena de modelos con respaldo para prevenir caídas por agotamiento de cuota (429)
+    llm_principal = ChatGoogleGenerativeAI(
         model="gemini-3.8-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
     )
+    
+    llm_respaldo_1 = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        api_key=api_key,
+        temperature=0.1,
+        streaming=True
+    )
+
+    llm_respaldo_2 = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash-8b",
+        api_key=api_key,
+        temperature=0.1,
+        streaming=True
+    )
+
+    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1, llm_respaldo_2])
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
@@ -95,28 +111,21 @@ Contexto disponible:
         ("human", "{input}")
     ])
 
-    return retriever, prompt, llm
+    return retriever, prompt, llm_con_fallbacks
 
 retriever, prompt, llm = cargar_componentes()
 
-# --- GENERADOR PARA STREAMING EN TIEMPO REAL ---
+# --- GENERADOR DE STREAMING CON CAPTURA DE ERRORES ---
 def stream_con_respaldo(chain, inputs):
     try:
         for chunk in chain.stream(inputs):
             yield chunk
-    except Exception as e_stream:
-        try:
-            llm_no_stream = ChatGoogleGenerativeAI(
-                model="gemini-3.8-flash",
-                api_key=api_key,
-                temperature=0.1,
-                streaming=False
-            )
-            chain_no_stream = prompt | llm_no_stream | StrOutputParser()
-            yield chain_no_stream.invoke(inputs)
-        except Exception as e_invoke:
-            err_msg = str(e_invoke) or str(e_stream)
-            yield f"⚠️ Error en Google API: {err_msg}"
+    except Exception as e:
+        err_str = str(e)
+        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            yield "⚠️ Se alcanzó el límite de consultas gratuitas de la API de Google por el momento. Espera 1 minuto antes de volver a realizar una pregunta."
+        else:
+            yield f"⚠️ Error en Google API: {err_str}"
 
 # --- INTERFAZ DE USUARIO ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
