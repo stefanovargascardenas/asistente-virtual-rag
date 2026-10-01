@@ -1,166 +1,218 @@
 import os
 import json
 import streamlit as st
+import pandas as pd
+import plotly.express as px
+from dotenv import load_dotenv
+
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-FAQ_FILE = "faqs.json"
-
-# --- FUNCIONES PARA GESTIONAR LAS PREGUNTAS FRECUENTES (FAQs) ---
-def cargar_faqs():
-    if "faqs_data" in st.session_state:
-        return st.session_state.faqs_data
-    
-    faqs_iniciales = {
-        "cuenta bcp": 10,
-        "caro": 8,
-        "profesores nativos": 6,
-        "no escuché antes": 4
-    }
-    
-    if os.path.exists(FAQ_FILE):
-        try:
-            with open(FAQ_FILE, "r", encoding="utf-8") as f:
-                faqs_iniciales = json.load(f)
-        except Exception:
-            pass
-            
-    st.session_state.faqs_data = faqs_iniciales
-    return faqs_iniciales
-
-def registrar_consulta(query: str):
-    query_norm = query.strip().lower()
-    if len(query_norm) < 2:
-        return
-    faqs = cargar_faqs()
-    faqs[query_norm] = faqs.get(query_norm, 0) + 1
-    st.session_state.faqs_data = faqs
-    
-    try:
-        with open(FAQ_FILE, "w", encoding="utf-8") as f:
-            json.dump(faqs, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-def obtener_top_faqs(limite=4):
-    faqs = cargar_faqs()
-    faqs_ordenadas = sorted(faqs.items(), key=lambda x: x[1], reverse=True)
-    return [item[0] for item in faqs_ordenadas[:limite]]
-
-# --- CONFIGURACIÓN DE PÁGINA ---
+# 1. Configuración de la página
 st.set_page_config(
-    page_title="Copiloto de Ventas - Premium English",
-    page_icon="⚡",
-    layout="centered"
+    page_title="Copiloto de Ventas IA",
+    page_icon="🤖",
+    layout="wide"
 )
 
-st.title("⚡ Copiloto de Ventas en Vivo")
-st.caption("Escribe la objeción o haz clic en las preguntas más frecuentes.")
+load_dotenv()
 
-api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
+# Archivo de persistencia de analítica
+FAQS_FILE = "faqs.json"
 
-if not api_key:
-    st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
-    st.stop()
+def load_faqs():
+    if os.path.exists(FAQS_FILE):
+        try:
+            with open(FAQS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
-# --- CARGA DE COMPONENTES RAG CON GOOGLE EMBEDDINGS (0% CPU LOCAL) ---
-@st.cache_resource(show_spinner=False)
-def cargar_componentes():
+def save_faqs(data):
+    with open(FAQS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def track_query(query_text):
+    data = load_faqs()
+    clean_q = query_text.strip().capitalize()
+    data[clean_q] = data.get(clean_q, 0) + 1
+    save_faqs(data)
+
+# 2. Carga de VectorStore y Modelos Gemini (Caché de Streamlit)
+@st.cache_resource
+def init_rag_system():
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        st.error("Error: NO se encontró la variable GOOGLE_API_KEY en el entorno.")
+        st.stop()
+        
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001",
         google_api_key=api_key
     )
     
-    vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
-
-    # Modelo principal según la recomendación oficial de Google
-    llm_principal = ChatGoogleGenerativeAI(
-        model="gemini-3.8-flash",
-        api_key=api_key,
-        temperature=0.1,
-        streaming=True
+    vectorstore = Chroma(
+        persist_directory="./chroma_db",
+        embedding_function=embeddings
     )
     
-    # Modelo de respaldo
-    llm_respaldo_1 = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
-        api_key=api_key,
-        temperature=0.1,
-        streaming=True
+    # LLM principal con fallback
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        temperature=0.2,
+        google_api_key=api_key
     )
+    
+    return vectorstore, llm
 
-    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1])
+vectorstore, llm = init_rag_system()
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
-Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
+# Template de prompt enfocado en respuestas directas para asesores
+SYSTEM_PROMPT = """Eres el copiloto en tiempo real para un asesor de ventas. 
+Tu trabajo es dar la respuesta exacta que el asesor debe leer o enviar al cliente.
 
-Reglas strictly directas de respuesta:
-1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
-2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
-3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
-4. **Instrucción de acción (si aplica):** Si el manual indica una regla o acción interna (ej: "Si dice Sí: agendar 5 min"), colócala en una línea aparte entre paréntesis al final.
+Reglas de respuesta:
+1. Sé directo, profesional y cordial.
+2. Si la información incluye datos sensibles (cuentas, CCI, precios), facilítalos estructurados.
+3. Termina siempre con una pregunta de cierre oportuna.
+4. Si hay alguna aclaración interna para el asesor, colócala al final entre paréntesis (ejemplo: (Nota: Validar comprobante en el sistema)).
 
-Contexto disponible:
-{context}"""),
-        ("human", "{input}")
-    ])
+Contexto relevante del manual:
+{context}
 
-    return retriever, prompt, llm_con_fallbacks
+Pregunta del cliente:
+{question}
+"""
 
-retriever, prompt, llm = cargar_componentes()
+prompt_template = ChatPromptTemplate.from_template(SYSTEM_PROMPT)
 
-# --- GENERADOR DE STREAMING CON ESCUDO DE ERRORES ---
-def stream_con_respaldo(chain, inputs):
-    try:
-        for chunk in chain.stream(inputs):
-            yield chunk
-    except Exception as e:
-        err_str = str(e)
-        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            yield "⚠️ Se alcanzó el límite momentáneo de consultas. Espera unos segundos e intenta nuevamente."
-        else:
-            yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
+# 3. Interfaz Principal con Pestañas
+tab_copiloto, tab_analytics = st.tabs(["💬 Copiloto de Ventas", "📊 Panel de Analítica"])
 
-# --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO ---
-st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
-top_preguntas = obtener_top_faqs(limite=4)
+# ----------------------------------------------------
+# PESTAÑA 1: COPILOTO DE VENTAS
+# ----------------------------------------------------
+with tab_copiloto:
+    st.title("🤖 Copiloto de Ventas en Vivo")
+    st.caption("Asistente IA para atención y ventas con búsqueda semántica y control de alucinaciones.")
 
-faq_seleccionada = None
-cols = st.columns(len(top_preguntas))
-for idx, preg in enumerate(top_preguntas):
-    if cols[idx].button(f"📌 {preg.capitalize()}", use_container_width=True, key=f"btn_faq_{idx}"):
-        faq_seleccionada = preg
+    # Sección Dinámica de Preguntas Frecuentes
+    faqs_data = load_faqs()
+    if faqs_data:
+        st.markdown("### ⚡ Accesos Rápidos (FAQs Más Frecuentes)")
+        top_faqs = sorted(faqs_data.items(), key=lambda x: x[1], reverse=True)[:4]
+        cols = st.columns(len(top_faqs))
+        for idx, (faq_text, count) in enumerate(top_faqs):
+            if cols[idx].button(f"📌 {faq_text} ({count})", use_container_width=True):
+                st.session_state["user_input_val"] = faq_text
 
-st.divider()
+    # Estado de chat
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "assistant", "content": "¡Hola! Estoy listo para ayudarte en la llamada. ¿Qué duda o requerimiento tiene el cliente?"}
+        ]
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # Mostrar historial
+    for i, msg in enumerate(st.session_state["messages"]):
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            # Agregar componente de feedback en las respuestas del asistente
+            if msg["role"] == "assistant" and i > 0:
+                st.feedback("thumbs", key=f"fb_{i}", disabled=True)
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+    # Captura de entrada
+    user_input = st.chat_input("Escribe la consulta del cliente aquí...")
+    
+    # Manejo de selección de FAQs rápidas
+    if "user_input_val" in st.session_state and st.session_state["user_input_val"]:
+        user_input = st.session_state.pop("user_input_val")
 
-chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos...")
-query_final = chat_input_val or faq_seleccionada
+    if user_input:
+        # Registrar pregunta para analítica
+        track_query(user_input)
 
-if query_final:
-    registrar_consulta(query_final)
+        st.session_state["messages"].append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-    st.session_state.messages.append({"role": "user", "content": query_final})
-    with st.chat_message("user"):
-        st.write(query_final)
+        with st.chat_message("assistant"):
+            # FILTRO DE SIMILITUD / ALUCINACIONES (Costo $0)
+            # Retorna documentos con sus puntuaciones de relevancia (0 a 1)
+            results_with_scores = vectorstore.similarity_search_with_relevance_scores(user_input, k=3)
+            
+            UMBRAL_SIMILITUD = 0.5  # Si la coincidencia es menor al 50%, se activa la respuesta segura
+            
+            # Validar si hay resultados válidos por encima del umbral
+            relevant_docs = [doc for doc, score in results_with_scores if score >= UMBRAL_SIMILITUD]
 
-    with st.chat_message("assistant"):
-        docs = retriever.invoke(query_final)
-        contexto = "\n\n".join([doc.page_content for doc in docs])
+            if not relevant_docs:
+                # Mensaje de resguardo en caso de no encontrar coincidencia confiable
+                fallback_msg = (
+                    "No encontré información específica sobre esa consulta en la base de conocimientos. "
+                    "Por favor, consulta con el supervisor de turno o valida el manual interno.\n\n"
+                    "*(Nota interna: Respuesta detenida por el filtro de seguridad para evitar alucinaciones)*"
+                )
+                st.markdown(fallback_msg)
+                st.session_state["messages"].append({"role": "assistant", "content": fallback_msg})
+            else:
+                # Construir contexto acumulado de los documentos relevantes
+                context_text = "\n\n---\n\n".join([doc.page_content for doc in relevant_docs])
+                
+                chain = prompt_template | llm | StrOutputParser()
+                
+                # Ejecución con Streaming
+                response_placeholder = st.empty()
+                full_response = ""
+                
+                for chunk in chain.stream({"context": context_text, "question": user_input}):
+                    full_response += chunk
+                    response_placeholder.markdown(full_response + "▌")
+                
+                response_placeholder.markdown(full_response)
+                
+                # Feedback del usuario (👍 / 👎)
+                st.feedback("thumbs", key=f"fb_{len(st.session_state['messages'])}")
+                
+                st.session_state["messages"].append({"role": "assistant", "content": full_response})
 
-        chain = prompt | llm | StrOutputParser()
-        inputs = {"context": contexto, "input": query_final}
+# ----------------------------------------------------
+# PESTAÑA 2: DASHBOARD DE ANALÍTICA E INTELIGENCIA
+# ----------------------------------------------------
+with tab_analytics:
+    st.title("📊 Dashboard de Analítica de Consultas")
+    st.caption("Métricas en tiempo real sobre las dudas recurrentes atendidas por el copiloto.")
 
-        respuesta_texto = st.write_stream(stream_con_respaldo(chain, inputs))
+    faqs = load_faqs()
+    if not faqs:
+        st.info("Aún no hay datos de consultas registrados. Haz algunas preguntas en el copiloto para ver el gráfico aquí.")
+    else:
+        df = pd.DataFrame(list(faqs.items()), columns=["Consulta", "Frecuencia"])
+        df = df.sort_values(by="Frecuencia", ascending=False)
 
-    st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
+        # KPIs Principales
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total de Consultas Registradas", df["Frecuencia"].sum())
+        col2.metric("Tipos de Preguntas Únicas", len(df))
+        col3.metric("Consulta Más Repetida", df.iloc[0]["Consulta"] if not df.empty else "N/A")
+
+        st.markdown("---")
+
+        # Gráfico interactivo con Plotly
+        fig = px.bar(
+            df.head(10),
+            x="Frecuencia",
+            y="Consulta",
+            orientation="h",
+            title="Top 10 Consultas Más Frecuentes de los Clientes",
+            color="Frecuencia",
+            color_continuous_scale="Blues"
+        )
+        fig.update_layout(yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Tabla de Datos
+        st.markdown("### 📋 Detalle Completo")
+        st.dataframe(df, use_container_width=True)
