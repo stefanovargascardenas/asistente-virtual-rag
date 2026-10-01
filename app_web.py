@@ -64,21 +64,20 @@ st.set_page_config(
 st.title("⚡ Copiloto de Ventas en Vivo")
 st.caption("Escribe la objeción o haz clic en las preguntas más frecuentes.")
 
-# Carga de API Key desde Secretos o variables de entorno
+# Carga de API Key
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini. Configúrala en Streamlit Secrets.")
     st.stop()
 
-# Cargar componentes RAG optimizados con caché
+# Cargar componentes RAG optimizados
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo directo compatible con streaming
     llm = ChatGoogleGenerativeAI(
         model="gemini-flash-latest",
         google_api_key=api_key,
@@ -105,6 +104,20 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
+# --- GENERADOR CON CAPTURA DE ERRORES PARA STREAMING SEGURO ---
+def stream_con_respaldo(chain, inputs):
+    """Escribe palabra por palabra y captura caídas de servidor de Google."""
+    try:
+        for chunk in chain.stream(inputs):
+            yield chunk
+    except Exception:
+        # Si falla la transmisión en vivo por un ServerError de Google, hace un fallback limpia
+        try:
+            respuesta_fallback = chain.invoke(inputs)
+            yield respuesta_fallback
+        except Exception:
+            yield "⚠️ Hubo una microinterrupción con el servidor de Google. Por favor, vuelve a intentar la consulta."
+
 # --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO (TOP PREGUNTAS) ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
 top_preguntas = obtener_top_faqs(limite=4)
@@ -117,7 +130,7 @@ for idx, preg in enumerate(top_preguntas):
 
 st.divider()
 
-# Historial de conversación en la interfaz
+# Historial de conversación
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -125,7 +138,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Capturar entrada: ya sea desde la caja de texto o desde un botón de FAQ
+# Capturar entrada
 chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos...")
 query_final = chat_input_val or faq_seleccionada
 
@@ -140,8 +153,10 @@ if query_final:
         docs = retriever.invoke(query_final)
         contexto = "\n\n".join([doc.page_content for doc in docs])
 
-        # Streaming en tiempo real directo
         chain = prompt | llm | StrOutputParser()
-        respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": query_final}))
+        inputs = {"context": contexto, "input": query_final}
+
+        # Transmisión segura a prueba de caídas
+        respuesta_texto = st.write_stream(stream_con_respaldo(chain, inputs))
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
