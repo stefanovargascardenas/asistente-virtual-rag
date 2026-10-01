@@ -1,6 +1,7 @@
 import os
 import streamlit as st
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -19,7 +20,10 @@ st.set_page_config(
 if "feedback_data" not in st.session_state:
     st.session_state.feedback_data = []
 
-# 1. Carga de VectorStore y Modelos Gemini (Caché de Streamlit)
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# 1. Carga de VectorStore y Modelos (Caché de Streamlit)
 @st.cache_resource
 def init_rag_system():
     api_key = os.getenv("GOOGLE_API_KEY")
@@ -27,18 +31,15 @@ def init_rag_system():
         st.error("Error: NO se encontró la variable GOOGLE_API_KEY en el entorno o en el archivo .env.")
         st.stop()
         
-    # Modelo de embeddings actualizado y compatible con la API actual de Google
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="text-embedding-004",
-        google_api_key=api_key
-    )
+    # Usar embeddings locales con HuggingFace para evitar errores 404 de la API de Google Embeddings
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
     vectorstore = Chroma(
         persist_directory="./chroma_db",
         embedding_function=embeddings
     )
     
-    # LLM actualizado con Gemini 1.5 Flash
+    # LLM principal con Gemini 1.5 Flash
     llm = ChatGoogleGenerativeAI(
         model="gemini-1.5-flash",
         temperature=0.2,
@@ -50,7 +51,7 @@ def init_rag_system():
 # Inicializar sistema RAG
 vectorstore, llm = init_rag_system()
 
-# Configurar el retriever con puntuación de similitud
+# Configurar el retriever
 retriever = vectorstore.as_retriever(
     search_type="similarity_score_threshold",
     search_kwargs={"k": 4, "score_threshold": 0.3}
@@ -86,20 +87,40 @@ chain = (
 st.title("🤖 Asistente Virtual RAG con Gemini")
 st.write("Pregúntame sobre tus documentos y te responderé con base en la información oficial.")
 
-# Pestañas principales para separar el Chat del Dashboard de Analítica
+# Pestañas principales
 tab_chat, tab_dashboard = st.tabs(["💬 Chat Asistente", "📊 Dashboard y Analítica"])
 
 with tab_chat:
-    # Contenedor del historial de chat
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # ── Preguntas Rápidas (Botones superiores) ──────────────────
+    st.markdown("### 💡 Preguntas frecuentes")
+    col_q1, col_q2, col_q3 = st.columns(3)
+    
+    quick_query = None
+    with col_q1:
+        if st.button("📞 ¿Qué duda tiene el cliente?"):
+            quick_query = "¿Qué duda o requerimiento tiene el cliente?"
+    with col_q2:
+        if st.button("🏦 Información sobre BCP"):
+            quick_query = "¿Cuáles son los detalles sobre BCP?"
+    with col_q3:
+        if st.button("📋 Resumen de documentos"):
+            quick_query = "Haz un resumen general de los documentos disponibles."
 
+    st.divider()
+
+    # Contenedor del historial de chat
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Entrada de usuario
-    if user_input := st.chat_input("Escribe tu pregunta aquí..."):
+    # Capturar entrada por chat o por botón rápido
+    user_input = st.chat_input("Escribe tu pregunta aquí...")
+    
+    # Si se hizo clic en una pregunta rápida, la procesamos como entrada de usuario
+    if quick_query:
+        user_input = quick_query
+
+    if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
@@ -107,14 +128,12 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("Analizando documentos y generando respuesta..."):
                 try:
-                    # Recuperar documentos primero para evaluar similitud / filtro
                     retrieved_docs = retriever.invoke(user_input)
                     
                     if not retrieved_docs:
                         response = "Lo siento, no he encontrado información relevante en los documentos para responder a tu consulta con suficiente precisión."
                         st.markdown(response)
                     else:
-                        # Generar respuesta mediante streaming
                         response_container = st.empty()
                         full_response = ""
                         
@@ -127,14 +146,13 @@ with tab_chat:
                         
                     st.session_state.messages.append({"role": "assistant", "content": response})
                     
-                    # Guardar registro para analítica básica (última pregunta y respuesta)
                     st.session_state.last_query = user_input
                     st.session_state.last_response = response
                     
                 except Exception as e:
                     st.error(f"Ocurrió un error al procesar tu consulta: {e}")
 
-    # Sección de Feedback para la última respuesta del asistente
+    # Sección de Feedback
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         st.divider()
         st.markdown("### ¿Te fue útil esta respuesta?")
@@ -166,7 +184,6 @@ with tab_dashboard:
     else:
         df_feedback = pd.DataFrame(st.session_state.feedback_data)
         
-        # Métricas superiores
         total_interacciones = len(st.session_state.messages) // 2
         total_feedbacks = len(df_feedback)
         positivos = len(df_feedback[df_feedback["feedback"] == "Positivo"])
@@ -179,7 +196,6 @@ with tab_dashboard:
         
         st.divider()
         
-        # Gráfico de distribución de feedback con Plotly
         st.subheader("Distribución de Feedback del Usuario")
         fig_feedback = px.pie(
             df_feedback, 
@@ -190,6 +206,5 @@ with tab_dashboard:
         )
         st.plotly_chart(fig_feedback, use_container_width=True)
         
-        # Tabla detallada de interacciones con feedback
         st.subheader("Historial de Retroalimentación Registrada")
         st.dataframe(df_feedback, use_container_width=True)
