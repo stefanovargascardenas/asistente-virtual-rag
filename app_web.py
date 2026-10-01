@@ -24,15 +24,14 @@ if not api_key:
     st.stop()
 
 # Cargar componentes RAG optimizados con caché
-@st.cache_resource
-def cargar_componentes():
+@st.cache_resource(show_spinner=False)
+def cargar_componentes(nombre_modelo: str = "gemini-1.5-flash"):
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo corregido a gemini-1.5-flash
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model=nombre_modelo,
         google_api_key=api_key,
         temperature=0.1
     )
@@ -41,7 +40,7 @@ def cargar_componentes():
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas estrictas de respuesta:
+Reglas strictly directas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
@@ -54,7 +53,7 @@ Contexto disponible:
 
     return retriever, prompt, llm
 
-retriever, prompt, llm = cargar_componentes()
+retriever, prompt, llm = cargar_componentes("gemini-1.5-flash")
 
 # Historial de conversación en la interfaz
 if "messages" not in st.session_state:
