@@ -77,30 +77,37 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo principal oficial con cuota gratuita alta (1,000 peticiones/día)
+    # Modelo principal oficial con cuota gratuita de ~1,500 peticiones/día
     llm_principal = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        google_api_key=api_key,
+        model="gemini-2.5-flash",
+        api_key=api_key,
         temperature=0.1,
         streaming=True
     )
     
-    # Modelo de respaldo en caso de saturación momentánea
-    llm_respaldo = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-8b",
-        google_api_key=api_key,
+    # Modelos de respaldo automáticos
+    llm_respaldo_1 = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash-lite",
+        api_key=api_key,
+        temperature=0.1,
+        streaming=True
+    )
+
+    llm_respaldo_2 = ChatGoogleGenerativeAI(
+        model="gemini-3.5-flash",
+        api_key=api_key,
         temperature=0.1,
         streaming=True
     )
 
     # Encadenamiento con fallbacks automáticos
-    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo])
+    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1, llm_respaldo_2])
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas estrictas de respuesta:
+Reglas strictly directas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
@@ -123,7 +130,7 @@ def stream_con_respaldo(chain, inputs):
     except Exception as e:
         err_str = str(e)
         if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            yield "⚠️ Se alcanzó el límite de consultas por minuto. Por favor, espera unos segundos e intenta nuevamente."
+            yield "⚠️ Se alcanzó el límite momentáneo de consultas. Espera unos segundos e intenta nuevamente."
         else:
             yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
 
