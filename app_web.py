@@ -2,8 +2,7 @@ import os
 import json
 import streamlit as st
 from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -11,7 +10,6 @@ FAQ_FILE = "faqs.json"
 
 # --- FUNCIONES PARA GESTIONAR LAS PREGUNTAS FRECUENTES (FAQs) ---
 def cargar_faqs():
-    """Carga el contador de preguntas desde session_state o archivo local."""
     if "faqs_data" in st.session_state:
         return st.session_state.faqs_data
     
@@ -33,7 +31,6 @@ def cargar_faqs():
     return faqs_iniciales
 
 def registrar_consulta(query: str):
-    """Incrementa la frecuencia de la consulta en el registro."""
     query_norm = query.strip().lower()
     if len(query_norm) < 2:
         return
@@ -48,7 +45,6 @@ def registrar_consulta(query: str):
         pass
 
 def obtener_top_faqs(limite=4):
-    """Devuelve las preguntas más frecuentes ordenadas por repetición."""
     faqs = cargar_faqs()
     faqs_ordenadas = sorted(faqs.items(), key=lambda x: x[1], reverse=True)
     return [item[0] for item in faqs_ordenadas[:limite]]
@@ -63,21 +59,23 @@ st.set_page_config(
 st.title("⚡ Copiloto de Ventas en Vivo")
 st.caption("Escribe la objeción o haz clic en las preguntas más frecuentes.")
 
-# Carga de API Key desde Streamlit Secrets o Variables de Entorno
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA DE COMPONENTES RAG Y MODELOS ESTABLES ---
+# --- CARGA DE COMPONENTES RAG CON GOOGLE EMBEDDINGS (0% CPU LOCAL) ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001",
+        google_api_key=api_key
+    )
+    
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo principal oficial con cuota gratuita de ~1,500 peticiones/día
     llm_principal = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         api_key=api_key,
@@ -85,7 +83,6 @@ def cargar_componentes():
         streaming=True
     )
     
-    # Modelos de respaldo automáticos
     llm_respaldo_1 = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
         api_key=api_key,
@@ -93,21 +90,13 @@ def cargar_componentes():
         streaming=True
     )
 
-    llm_respaldo_2 = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
-        api_key=api_key,
-        temperature=0.1,
-        streaming=True
-    )
-
-    # Encadenamiento con fallbacks automáticos
-    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1, llm_respaldo_2])
+    llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1])
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas strictly directas de respuesta:
+Reglas estrictas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
@@ -134,7 +123,7 @@ def stream_con_respaldo(chain, inputs):
         else:
             yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
 
-# --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO (TOP PREGUNTAS) ---
+# --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
 top_preguntas = obtener_top_faqs(limite=4)
 
@@ -146,7 +135,6 @@ for idx, preg in enumerate(top_preguntas):
 
 st.divider()
 
-# Historial de conversación
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -154,7 +142,6 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Capturar entrada por texto o por botón FAQ
 chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos...")
 query_final = chat_input_val or faq_seleccionada
 

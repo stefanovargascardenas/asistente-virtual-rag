@@ -1,24 +1,36 @@
 import os
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from dotenv import load_dotenv
+from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import Chroma
 
-print("Cargando información de la carpeta documentos...")
-# Le indicamos explícitamente la codificación UTF-8 para tildes y eñes
-loader = DirectoryLoader(
-    'documentos/', 
-    glob="*.txt", 
-    loader_cls=TextLoader, 
-    loader_kwargs={'encoding': 'utf-8'}
-)
+# Cargar variables de entorno (.env)
+load_dotenv()
+api_key = os.getenv("GOOGLE_API_KEY")
+
+if not api_key:
+    raise ValueError("⚠️ No se encontró GOOGLE_API_KEY en tu archivo .env")
+
+# 1. Cargar el archivo de documento
+loader = TextLoader("documentos/manual_prueba.txt", encoding="utf-8")
 documents = loader.load()
 
+# 2. Fragmentar el texto
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 docs = text_splitter.split_documents(documents)
 
-print("Creando base de datos de vectores en chroma_db...")
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-vectorstore = Chroma.from_documents(docs, embeddings, persist_directory="chroma_db")
+# 3. Embeddings de Google (models/gemini-embedding-001)
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001",
+    google_api_key=api_key
+)
 
-print("¡Base de datos regenerada con éxito!")
+# 4. Generar / Reemplazar la base de datos ChromaDB
+vectorstore = Chroma.from_documents(
+    documents=docs,
+    embedding=embeddings,
+    persist_directory="chroma_db"
+)
+
+print("✅ Base de datos 'chroma_db' regenerada exitosamente con Google Embeddings (models/gemini-embedding-001).")
