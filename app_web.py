@@ -1,56 +1,34 @@
 import os
-import json
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-from dotenv import load_dotenv
-
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+import pandas as pd
+import plotly.express as px
 
-# 1. Configuración de la página
+# Configuración de la página
 st.set_page_config(
-    page_title="Copiloto de Ventas IA",
+    page_title="Asistente Virtual RAG",
     page_icon="🤖",
     layout="wide"
 )
 
-load_dotenv()
+# Inicializar estado para el feedback y analítica si no existe
+if "feedback_data" not in st.session_state:
+    st.session_state.feedback_data = []
 
-# Archivo de persistencia de analítica
-FAQS_FILE = "faqs.json"
-
-def load_faqs():
-    if os.path.exists(FAQS_FILE):
-        try:
-            with open(FAQS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_faqs(data):
-    with open(FAQS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def track_query(query_text):
-    data = load_faqs()
-    clean_q = query_text.strip().capitalize()
-    data[clean_q] = data.get(clean_q, 0) + 1
-    save_faqs(data)
-
-# 2. Carga de VectorStore y Modelos Gemini (Caché de Streamlit)
+# 1. Carga de VectorStore y Modelos Gemini (Caché de Streamlit)
 @st.cache_resource
 def init_rag_system():
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        st.error("Error: NO se encontró la variable GOOGLE_API_KEY en el entorno.")
+        st.error("Error: NO se encontró la variable GOOGLE_API_KEY en el entorno o en el archivo .env.")
         st.stop()
         
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
+        model="models/embedding-001",
         google_api_key=api_key
     )
     
@@ -59,7 +37,7 @@ def init_rag_system():
         embedding_function=embeddings
     )
     
-    # LLM principal con fallback
+    # LLM actualizado y compatible con la versión actual de la API de Google
     llm = ChatGoogleGenerativeAI(
         model="gemini-1.5-flash",
         temperature=0.2,
@@ -68,151 +46,149 @@ def init_rag_system():
     
     return vectorstore, llm
 
+# Inicializar sistema RAG
 vectorstore, llm = init_rag_system()
 
-# Template de prompt enfocado en respuestas directas para asesores
-SYSTEM_PROMPT = """Eres el copiloto en tiempo real para un asesor de ventas. 
-Tu trabajo es dar la respuesta exacta que el asesor debe leer o enviar al cliente.
+# Configurar el retriever con puntuación de similitud
+retriever = vectorstore.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={"k": 4, "score_threshold": 0.3}
+)
 
-Reglas de respuesta:
-1. Sé directo, profesional y cordial.
-2. Si la información incluye datos sensibles (cuentas, CCI, precios), facilítalos estructurados.
-3. Termina siempre con una pregunta de cierre oportuna.
-4. Si hay alguna aclaración interna para el asesor, colócala al final entre paréntesis (ejemplo: (Nota: Validar comprobante en el sistema)).
+# Prompt del sistema
+template = """Eres un asistente virtual experto y amable. 
+Usa estrictamente el siguiente contexto recuperado para responder a la pregunta del usuario.
+Si la respuesta no se encuentra en el contexto, di educadamente que no tienes información al respecto basada en los documentos provistos, sin inventar datos.
 
-Contexto relevante del manual:
+Contexto:
 {context}
 
-Pregunta del cliente:
+Pregunta:
 {question}
-"""
 
-prompt_template = ChatPromptTemplate.from_template(SYSTEM_PROMPT)
+Respuesta clara y detallada:"""
 
-# 3. Interfaz Principal con Pestañas
-tab_copiloto, tab_analytics = st.tabs(["💬 Copiloto de Ventas", "📊 Panel de Analítica"])
+prompt = ChatPromptTemplate.from_template(template)
 
-# ----------------------------------------------------
-# PESTAÑA 1: COPILOTO DE VENTAS
-# ----------------------------------------------------
-with tab_copiloto:
-    st.title("🤖 Copiloto de Ventas en Vivo")
-    st.caption("Asistente IA para atención y ventas con búsqueda semántica y control de alucinaciones.")
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
 
-    # Sección Dinámica de Preguntas Frecuentes
-    faqs_data = load_faqs()
-    if faqs_data:
-        st.markdown("### ⚡ Accesos Rápidos (FAQs Más Frecuentes)")
-        top_faqs = sorted(faqs_data.items(), key=lambda x: x[1], reverse=True)[:4]
-        cols = st.columns(len(top_faqs))
-        for idx, (faq_text, count) in enumerate(top_faqs):
-            if cols[idx].button(f"📌 {faq_text} ({count})", use_container_width=True):
-                st.session_state["user_input_val"] = faq_text
+# Cadena RAG usando LangChain Expression Language (LCEL)
+chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
 
-    # Estado de chat
+# Interfaz de Usuario en Streamlit
+st.title("🤖 Asistente Virtual RAG con Gemini")
+st.write("Pregúntame sobre tus documentos y te responderé con base en la información oficial.")
+
+# Pestañas principales para separar el Chat del Dashboard de Analítica
+tab_chat, tab_dashboard = st.tabs(["💬 Chat Asistente", "📊 Dashboard y Analítica"])
+
+with tab_chat:
+    # Contenedor del historial de chat
     if "messages" not in st.session_state:
-        st.session_state["messages"] = [
-            {"role": "assistant", "content": "¡Hola! Estoy listo para ayudarte en la llamada. ¿Qué duda o requerimiento tiene el cliente?"}
-        ]
+        st.session_state.messages = []
 
-    # Mostrar historial
-    for i, msg in enumerate(st.session_state["messages"]):
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            # Agregar componente de feedback en las respuestas del asistente
-            if msg["role"] == "assistant" and i > 0:
-                st.feedback("thumbs", key=f"fb_{i}", disabled=True)
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    # Captura de entrada
-    user_input = st.chat_input("Escribe la consulta del cliente aquí...")
-    
-    # Manejo de selección de FAQs rápidas
-    if "user_input_val" in st.session_state and st.session_state["user_input_val"]:
-        user_input = st.session_state.pop("user_input_val")
-
-    if user_input:
-        # Registrar pregunta para analítica
-        track_query(user_input)
-
-        st.session_state["messages"].append({"role": "user", "content": user_input})
+    # Entrada de usuario
+    if user_input := st.chat_input("Escribe tu pregunta aquí..."):
+        st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
-            # FILTRO DE SIMILITUD / ALUCINACIONES (Costo $0)
-            # Retorna documentos con sus puntuaciones de relevancia (0 a 1)
-            results_with_scores = vectorstore.similarity_search_with_relevance_scores(user_input, k=3)
-            
-            UMBRAL_SIMILITUD = 0.5  # Si la coincidencia es menor al 50%, se activa la respuesta segura
-            
-            # Validar si hay resultados válidos por encima del umbral
-            relevant_docs = [doc for doc, score in results_with_scores if score >= UMBRAL_SIMILITUD]
+            with st.spinner("Analizando documentos y generando respuesta..."):
+                try:
+                    # Recuperar documentos primero para evaluar similitud / filtro
+                    retrieved_docs = retriever.invoke(user_input)
+                    
+                    if not retrieved_docs:
+                        response = "Lo siento, no he encontrado información relevante en los documentos para responder a tu consulta con suficiente precisión."
+                        st.markdown(response)
+                    else:
+                        # Generar respuesta mediante streaming
+                        response_container = st.empty()
+                        full_response = ""
+                        
+                        for chunk in chain.stream(user_input):
+                            full_response += chunk
+                            response_container.markdown(full_response + "▌")
+                        
+                        response_container.markdown(full_response)
+                        response = full_response
+                        
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    
+                    # Guardar registro para analítica básica (última pregunta y respuesta)
+                    st.session_state.last_query = user_input
+                    st.session_state.last_response = response
+                    
+                except Exception as e:
+                    st.error(f"Ocurrió un error al procesar tu consulta: {e}")
 
-            if not relevant_docs:
-                # Mensaje de resguardo en caso de no encontrar coincidencia confiable
-                fallback_msg = (
-                    "No encontré información específica sobre esa consulta en la base de conocimientos. "
-                    "Por favor, consulta con el supervisor de turno o valida el manual interno.\n\n"
-                    "*(Nota interna: Respuesta detenida por el filtro de seguridad para evitar alucinaciones)*"
-                )
-                st.markdown(fallback_msg)
-                st.session_state["messages"].append({"role": "assistant", "content": fallback_msg})
-            else:
-                # Construir contexto acumulado de los documentos relevantes
-                context_text = "\n\n---\n\n".join([doc.page_content for doc in relevant_docs])
-                
-                chain = prompt_template | llm | StrOutputParser()
-                
-                # Ejecución con Streaming
-                response_placeholder = st.empty()
-                full_response = ""
-                
-                for chunk in chain.stream({"context": context_text, "question": user_input}):
-                    full_response += chunk
-                    response_placeholder.markdown(full_response + "▌")
-                
-                response_placeholder.markdown(full_response)
-                
-                # Feedback del usuario (👍 / 👎)
-                st.feedback("thumbs", key=f"fb_{len(st.session_state['messages'])}")
-                
-                st.session_state["messages"].append({"role": "assistant", "content": full_response})
+    # Sección de Feedback para la última respuesta del asistente
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+        st.divider()
+        st.markdown("### ¿Te fue útil esta respuesta?")
+        col1, col2, col3 = st.columns([1, 1, 4])
+        
+        with col1:
+            if st.button("👍 Sí, útil"):
+                st.session_state.feedback_data.append({
+                    "pregunta": st.session_state.get("last_query", ""),
+                    "feedback": "Positivo",
+                    "timestamp": pd.Timestamp.now()
+                })
+                st.success("¡Gracias por tu feedback positivo!")
+        with col2:
+            if st.button("👎 No útil"):
+                st.session_state.feedback_data.append({
+                    "pregunta": st.session_state.get("last_query", ""),
+                    "feedback": "Negativo",
+                    "timestamp": pd.Timestamp.now()
+                })
+                st.warning("Gracias. Tomaremos en cuenta este reporte para mejorar.")
 
-# ----------------------------------------------------
-# PESTAÑA 2: DASHBOARD DE ANALÍTICA E INTELIGENCIA
-# ----------------------------------------------------
-with tab_analytics:
-    st.title("📊 Dashboard de Analítica de Consultas")
-    st.caption("Métricas en tiempo real sobre las dudas recurrentes atendidas por el copiloto.")
-
-    faqs = load_faqs()
-    if not faqs:
-        st.info("Aún no hay datos de consultas registrados. Haz algunas preguntas en el copiloto para ver el gráfico aquí.")
+with tab_dashboard:
+    st.header("📊 Panel de Analítica y Uso del Asistente")
+    st.write("Métricas de interacción, volumen de consultas y registros de satisfacción de los usuarios.")
+    
+    if len(st.session_state.feedback_data) == 0:
+        st.info("Aún no hay registros de feedback en esta sesión. Interactúa con el chat para generar datos en el dashboard.")
     else:
-        df = pd.DataFrame(list(faqs.items()), columns=["Consulta", "Frecuencia"])
-        df = df.sort_values(by="Frecuencia", ascending=False)
-
-        # KPIs Principales
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de Consultas Registradas", df["Frecuencia"].sum())
-        col2.metric("Tipos de Preguntas Únicas", len(df))
-        col3.metric("Consulta Más Repetida", df.iloc[0]["Consulta"] if not df.empty else "N/A")
-
-        st.markdown("---")
-
-        # Gráfico interactivo con Plotly
-        fig = px.bar(
-            df.head(10),
-            x="Frecuencia",
-            y="Consulta",
-            orientation="h",
-            title="Top 10 Consultas Más Frecuentes de los Clientes",
-            color="Frecuencia",
-            color_continuous_scale="Blues"
+        df_feedback = pd.DataFrame(st.session_state.feedback_data)
+        
+        # Métricas superiores
+        total_interacciones = len(st.session_state.messages) // 2
+        total_feedbacks = len(df_feedback)
+        positivos = len(df_feedback[df_feedback["feedback"] == "Positivo"])
+        satisfaccion = (positivos / total_feedbacks * 100) if total_feedbacks > 0 else 0
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Consultas Realizadas", total_interacciones)
+        col_m2.metric("Total de Feedbacks", total_feedbacks)
+        col_m3.metric("Tasa de Satisfacción", f"{satisfaccion:.1f}%")
+        
+        st.divider()
+        
+        # Gráfico de distribución de feedback con Plotly
+        st.subheader("Distribución de Feedback del Usuario")
+        fig_feedback = px.pie(
+            df_feedback, 
+            names="feedback", 
+            title="Proporción de Feedback (Positivo vs Negativo)",
+            color="feedback",
+            color_discrete_map={"Positivo": "#00CC96", "Negativo": "#EF553B"}
         )
-        fig.update_layout(yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Tabla de Datos
-        st.markdown("### 📋 Detalle Completo")
-        st.dataframe(df, use_container_width=True)
+        st.plotly_chart(fig_feedback, use_container_width=True)
+        
+        # Tabla detallada de interacciones con feedback
+        st.subheader("Historial de Retroalimentación Registrada")
+        st.dataframe(df_feedback, use_container_width=True)
