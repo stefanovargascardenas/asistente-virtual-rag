@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -6,7 +7,47 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# Configuración de la página
+# Archivo local para almacenar el conteo de preguntas
+FAQ_FILE = "faqs.json"
+
+# --- FUNCIONES PARA GESTIONAR LAS PREGUNTAS FRECUENTES (FAQs) ---
+def cargar_faqs():
+    """Carga el contador de preguntas o inicializa valores por defecto."""
+    if os.path.exists(FAQ_FILE):
+        try:
+            with open(FAQ_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # Valores por defecto iniciales
+    return {
+        "cuenta bcp": 10,
+        "caro": 8,
+        "profesores nativos": 6,
+        "no escuché antes": 4
+    }
+
+def registrar_consulta(query: str):
+    """Incrementa la frecuencia de la consulta en el registro."""
+    query_norm = query.strip().lower()
+    if len(query_norm) < 2:
+        return
+    faqs = cargar_faqs()
+    faqs[query_norm] = faqs.get(query_norm, 0) + 1
+    try:
+        with open(FAQ_FILE, "w", encoding="utf-8") as f:
+            json.dump(faqs, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def obtener_top_faqs(limite=4):
+    """Devuelve las preguntas más frecuentes ordenadas por repetición."""
+    faqs = cargar_faqs()
+    # Ordenar de mayor a menor frecuencia
+    faqs_ordenadas = sorted(faqs.items(), key=lambda x: x[1], reverse=True)
+    return [item[0] for item in faqs_ordenadas[:limite]]
+
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
     page_title="Copiloto de Ventas - Premium English",
     page_icon="⚡",
@@ -14,7 +55,7 @@ st.set_page_config(
 )
 
 st.title("⚡ Copiloto de Ventas en Vivo")
-st.caption("Escribe la objeción o consulta rápida para obtener el guion exacto.")
+st.caption("Escribe la objeción o haz clic en las preguntas más frecuentes.")
 
 # Carga de API Key desde Secretos o variables de entorno
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -30,7 +71,6 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-    # Modelo con streaming habilitado
     llm = ChatGoogleGenerativeAI(
         model="gemini-flash-latest",
         google_api_key=api_key,
@@ -42,11 +82,11 @@ def cargar_componentes():
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas strictly directas de respuesta:
+Reglas estrictas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
-4. **Instrucción de acción (si aplica):** Si el manual indica una regla o acción interna (ej: "Si dice Sí: agendar 5 min"), colócala en una líneaaparte entre paréntesis al final.
+4. **Instrucción de acción (si aplica):** Si el manual indica una regla o acción interna (ej: "Si dice Sí: agendar 5 min"), colócala en una línea aparte entre paréntesis al final.
 
 Contexto disponible:
 {context}"""),
@@ -57,6 +97,19 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
+# --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO (TOP PREGUNTAS) ---
+st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
+top_preguntas = obtener_top_faqs(limite=4)
+
+faq_seleccionada = None
+cols = st.columns(len(top_preguntas))
+for idx, preg in enumerate(top_preguntas):
+    # Crear un botón rápido por cada pregunta del Top
+    if cols[idx].button(f"📌 {preg.capitalize()}", use_container_width=True, key=f"btn_faq_{idx}"):
+        faq_seleccionada = preg
+
+st.divider()
+
 # Historial de conversación en la interfaz
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -65,19 +118,25 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Entrada de usuario y ejecución con Streaming en tiempo real
-if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos..."):
-    st.session_state.messages.append({"role": "user", "content": user_input})
+# Capturar entrada: ya sea desde la caja de texto o desde un botón de FAQ
+chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos...")
+query_final = chat_input_val or faq_seleccionada
+
+if query_final:
+    # Registrar la pregunta para actualizar el contador de frecuencia
+    registrar_consulta(query_final)
+
+    st.session_state.messages.append({"role": "user", "content": query_final})
     with st.chat_message("user"):
-        st.write(user_input)
+        st.write(query_final)
 
     with st.chat_message("assistant"):
         # 1. Búsqueda vectorial
-        docs = retriever.invoke(user_input)
+        docs = retriever.invoke(query_final)
         contexto = "\n\n".join([doc.page_content for doc in docs])
 
-        # 2. Generación en streaming en vivo
+        # 2. Generación en streaming
         chain = prompt | llm | StrOutputParser()
-        respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": user_input}))
+        respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": query_final}))
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
