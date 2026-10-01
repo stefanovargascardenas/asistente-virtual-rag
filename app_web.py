@@ -78,8 +78,9 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
+    # Modelo directo compatible con streaming
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model="gemini-flash-latest",
         google_api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -89,7 +90,7 @@ def cargar_componentes():
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas strictly directas de respuesta:
+Reglas estrictas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
@@ -139,20 +140,8 @@ if query_final:
         docs = retriever.invoke(query_final)
         contexto = "\n\n".join([doc.page_content for doc in docs])
 
+        # Streaming en tiempo real directo
         chain = prompt | llm | StrOutputParser()
-
-        # Intento con streaming y respaldo en caso de ServerError
-        try:
-            respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": query_final}))
-        except Exception:
-            with st.spinner("Obteniendo guion..."):
-                llm_backup = ChatGoogleGenerativeAI(
-                    model="gemini-flash-latest",
-                    google_api_key=api_key,
-                    temperature=0.1
-                )
-                chain_backup = prompt | llm_backup | StrOutputParser()
-                respuesta_texto = chain_backup.invoke({"context": contexto, "input": query_final})
-                st.write(respuesta_texto)
+        respuesta_texto = st.write_stream(chain.stream({"context": contexto, "input": query_final}))
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
