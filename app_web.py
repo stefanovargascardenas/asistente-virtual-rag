@@ -6,7 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# Configuración de página
+# Configuración de la página
 st.set_page_config(
     page_title="Copiloto de Ventas - Premium English",
     page_icon="⚡",
@@ -16,22 +16,23 @@ st.set_page_config(
 st.title("⚡ Copiloto de Ventas en Vivo")
 st.caption("Escribe la objeción o consulta rápida para obtener el guion exacto.")
 
-# Carga de la API Key
+# Carga de API Key desde Secretos o variables de entorno
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini. Configúrala en Streamlit Secrets.")
     st.stop()
 
-# Cargar componentes RAG con caché para máxima velocidad
+# Cargar componentes RAG optimizados con caché
 @st.cache_resource
 def cargar_componentes():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
+    # Modelo corregido a gemini-1.5-flash
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-1.5-flash",
         google_api_key=api_key,
         temperature=0.1
     )
@@ -55,7 +56,7 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
-# Historial de conversación
+# Historial de conversación en la interfaz
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -63,7 +64,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Entrada de usuario y generación de respuesta
+# Entrada de usuario y ejecución de la respuesta
 if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -71,11 +72,11 @@ if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profeso
 
     with st.chat_message("assistant"):
         with st.spinner("Buscando guion..."):
-            # 1. Recuperar documentos relevantes
+            # 1. Recuperación de contexto
             docs = retriever.invoke(user_input)
             contexto = "\n\n".join([doc.page_content for doc in docs])
 
-            # 2. Ejecutar cadena LCEL
+            # 2. Generación mediante LCEL
             chain = prompt | llm | StrOutputParser()
             respuesta_texto = chain.invoke({"context": contexto, "input": user_input})
 
