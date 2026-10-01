@@ -71,18 +71,20 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini. Configúrala en Streamlit Secrets.")
     st.stop()
 
-# Cargar componentes RAG optimizados
+# Cargar componentes RAG optimizados con reintentos integrados
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
+    # Modelo ultra-estable gemini-1.5-flash con 3 reintentos automáticos
     llm = ChatGoogleGenerativeAI(
-        model="gemini-flash-latest",
+        model="gemini-1.5-flash",
         google_api_key=api_key,
         temperature=0.1,
-        streaming=True
+        streaming=True,
+        max_retries=3
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -104,19 +106,24 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
-# --- GENERADOR CON CAPTURA DE ERRORES PARA STREAMING SEGURO ---
-def stream_con_respaldo(chain, inputs):
-    """Escribe palabra por palabra y captura caídas de servidor de Google."""
+# --- GENERADOR CON STREAMING Y RESPALDO ROBUTO ---
+def stream_con_respaldo(chain, inputs, prompt, api_key):
     try:
         for chunk in chain.stream(inputs):
             yield chunk
     except Exception:
-        # Si falla la transmisión en vivo por un ServerError de Google, hace un fallback limpia
+        # Fallback instantáneo en modo síncrono si el stream parpadea
         try:
-            respuesta_fallback = chain.invoke(inputs)
-            yield respuesta_fallback
+            llm_backup = ChatGoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=api_key,
+                temperature=0.1,
+                max_retries=3
+            )
+            chain_backup = prompt | llm_backup | StrOutputParser()
+            yield chain_backup.invoke(inputs)
         except Exception:
-            yield "⚠️ Hubo una microinterrupción con el servidor de Google. Por favor, vuelve a intentar la consulta."
+            yield "⚠️ Hubo una microinterrupción temporal con Google. Por favor, presiona el botón nuevamente."
 
 # --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO (TOP PREGUNTAS) ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
@@ -156,7 +163,7 @@ if query_final:
         chain = prompt | llm | StrOutputParser()
         inputs = {"context": contexto, "input": query_final}
 
-        # Transmisión segura a prueba de caídas
-        respuesta_texto = st.write_stream(stream_con_respaldo(chain, inputs))
+        # Generación con reintentos y streaming estable
+        respuesta_texto = st.write_stream(stream_con_respaldo(chain, inputs, prompt, api_key))
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
