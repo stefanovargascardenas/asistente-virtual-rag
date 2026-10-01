@@ -76,15 +76,17 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
+    # Modelo principal según la recomendación oficial de Google
     llm_principal = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
     )
     
+    # Modelo de respaldo
     llm_respaldo_1 = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.5-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -96,7 +98,7 @@ def cargar_componentes():
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
 
-Reglas estrictas de respuesta:
+Reglas strictly directas de respuesta:
 1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
 2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
 3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
