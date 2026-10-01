@@ -7,7 +7,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# Configuración de página minimalista para máxima velocidad
 st.set_page_config(
     page_title="Copiloto de Ventas - Premium English",
     page_icon="⚡",
@@ -17,14 +16,12 @@ st.set_page_config(
 st.title("⚡ Copiloto de Ventas en Vivo")
 st.caption("Escribe la objeción o consulta rápida para obtener el guion exacto.")
 
-# Cargar API Key desde los Secretos de Streamlit o variables de entorno
 api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini. Configúrala en Streamlit Secrets.")
     st.stop()
 
-# Cargar base de datos y modelo con caché para respuesta inmediata
 @st.cache_resource
 def iniciar_cadena_rag():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -57,7 +54,6 @@ Contexto disponible:
 
 rag_chain = iniciar_cadena_rag()
 
-# Historial de conversación en pantalla
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -65,7 +61,6 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Entrada de la consulta
 if user_input := st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
