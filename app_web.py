@@ -72,8 +72,9 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
+    # Modelo oficial para respuesta rápida y streaming continuo
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -98,16 +99,15 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
-# --- GENERADOR CON DIAGNÓSTICO DE ERRORES ---
+# --- GENERADOR PARA STREAMING EN TIEMPO REAL ---
 def stream_con_respaldo(chain, inputs):
     try:
         for chunk in chain.stream(inputs):
             yield chunk
     except Exception as e_stream:
-        # Intento de respaldo no-stream
         try:
             llm_no_stream = ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 api_key=api_key,
                 temperature=0.1,
                 streaming=False
@@ -115,7 +115,6 @@ def stream_con_respaldo(chain, inputs):
             chain_no_stream = prompt | llm_no_stream | StrOutputParser()
             yield chain_no_stream.invoke(inputs)
         except Exception as e_invoke:
-            # Revelar el error exacto recibido desde la API de Google
             err_msg = str(e_invoke) or str(e_stream)
             yield f"⚠️ Error en Google API: {err_msg}"
 
