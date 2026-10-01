@@ -27,8 +27,9 @@ def init_rag_system():
         st.error("Error: NO se encontró la variable GOOGLE_API_KEY en el entorno o en el archivo .env.")
         st.stop()
         
+    # Modelo de embeddings actualizado y compatible con la API actual de Google
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
+        model="text-embedding-004",
         google_api_key=api_key
     )
     
@@ -37,7 +38,7 @@ def init_rag_system():
         embedding_function=embeddings
     )
     
-    # LLM actualizado y compatible con la versión actual de la API de Google
+    # LLM actualizado con Gemini 1.5 Flash
     llm = ChatGoogleGenerativeAI(
         model="gemini-1.5-flash",
         temperature=0.2,
