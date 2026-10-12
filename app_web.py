@@ -74,7 +74,7 @@ def cargar_componentes():
     )
     
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     # Modelo oficial gemini-3.8-flash sin fallbacks
     llm = ChatGoogleGenerativeAI(
@@ -89,10 +89,10 @@ def cargar_componentes():
 Tu función es darle al asesor la información exacta o el guion que necesita de inmediato para la llamada.
 
 Reglas de respuesta:
-1. **Directo y sin rodeos:** Responde ÚNICAMENTE con los datos solicitados (como RUCs, razones sociales, cuentas, precios) o el guion exacto que debe leer el asesor. Jamás agregues saludos ni introducciones como "Dile esto:".
+1. **Directo y sin rodeos:** Responde ÚNICAMENTE con los datos solicitados (como RUCs, razones sociales, cuentas bancarias, links, precios) o el guion exacto que debe leer el asesor. Jamás agregues saludos ni introducciones como "Dile esto:".
 2. **Fidelidad al manual:** Utiliza la información textual exacta que figura en el contexto.
 3. **Versatilidad según la consulta:** 
-   - Si piden un dato puntual (ej: "RUC", "cuenta", "oferta expomina"), entrégalo limpio y ordenado tal como figura en el manual.
+   - Si piden un dato puntual (ej: "RUC", "cuenta", "oferta expomina", "planes"), entrégalo limpio y ordenado tal como figura en el manual.
    - Si es una objeción (ej: "caro", "no escuché antes"), entrega el guion de ventas exacto con su respectiva pregunta de cierre o instrucción si el manual lo indica.
 
 Contexto disponible:
@@ -135,7 +135,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, profesores nativos...")
+chat_input_val = st.chat_input("Ej: no escuché antes, caro, cuenta bcp, RUC, oferta expomina...")
 query_final = chat_input_val or faq_seleccionada
 
 if query_final:

@@ -17,7 +17,7 @@ path_manual = os.path.join("documentos", "manual_prueba.txt")
 with open(path_manual, "r", encoding="utf-8") as f:
     contenido = f.read()
 
-# 2. Fragmentar el texto por párrafos/bloques usando Python puro (evita torch)
+# 2. Fragmentar por bloques/secciones completas (evita partir RUCs o guiones a la mitad)
 bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
 documents = [Document(page_content=bloque) for bloque in bloques]
 
@@ -27,7 +27,7 @@ embeddings = GoogleGenerativeAIEmbeddings(
     google_api_key=api_key
 )
 
-# 4. Limpieza previa de chroma_db para evitar bloqueos de Windows
+# 4. Limpieza previa de la carpeta local chroma_db
 if os.path.exists("chroma_db"):
     try:
         shutil.rmtree("chroma_db", ignore_errors=True)
@@ -42,4 +42,4 @@ vectorstore = Chroma.from_documents(
     persist_directory="chroma_db"
 )
 
-print("✅ Base de datos 'chroma_db' regenerada exitosamente sin dependencias locales pesadas.")
+print("✅ Base de datos 'chroma_db' regenerada exitosamente con todo el manual completo.")
