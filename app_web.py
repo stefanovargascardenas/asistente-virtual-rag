@@ -73,8 +73,9 @@ def cargar_componentes():
         google_api_key=api_key
     )
     
+    # Subimos a k=3 para capturar mejor los bloques de datos y guiones
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
     # Modelo principal según la recomendación oficial de Google
     llm_principal = ChatGoogleGenerativeAI(
@@ -94,15 +95,17 @@ def cargar_componentes():
 
     llm_con_fallbacks = llm_principal.with_fallbacks([llm_respaldo_1])
 
+    # Prompt actualizado para manejar tanto guiones como datos directos (RUC, ofertas)
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
-Tu única función es darle al asesor el guion EXACTO que debe leerle al cliente en la llamada de inmediato.
+Tu función es darle al asesor la información exacta o el guion que necesita de inmediato para la llamada.
 
-Reglas strictly directas de respuesta:
-1. **Guion directo:** Responde ÚNICAMENTE con las palabras exactas que el asesor debe decir en voz alta. Jamás agregues introducciones, saludos ni frases como "Dile esto:" o "Puedes responder:".
-2. **Fidelidad al manual:** Utiliza la respuesta textual que figura en el contexto para esa objeción, precio, link o cuenta bancaria.
-3. **Pregunta de cierre:** Incluye siempre al final la pregunta de filtro o cierre del manual para mantener el control de la llamada.
-4. **Instrucción de acción (si aplica):** Si el manual indica una regla o acción interna (ej: "Si dice Sí: agendar 5 min"), colócala en una línea aparte entre paréntesis al final.
+Reglas de respuesta:
+1. **Directo y sin rodeos:** Responde ÚNICAMENTE con los datos solicitados (como RUCs, razones sociales, cuentas, precios) o el guion exacto que debe leer el asesor. Jamás agregues saludos ni introducciones como "Dile esto:".
+2. **Fidelidad al manual:** Utiliza la información textual exacta que figura en el contexto.
+3. **Versatilidad según la consulta:** 
+   - Si piden un dato puntual (ej: "RUC", "cuenta", "oferta expomina"), entrégalo limpio y ordenado tal como figura en el manual.
+   - Si es una objeción (ej: "caro", "no escuché antes"), entrega el guion de ventas exacto con su respectiva pregunta de cierre o instrucción si el manual lo indica.
 
 Contexto disponible:
 {context}"""),

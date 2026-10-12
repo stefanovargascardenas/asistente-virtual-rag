@@ -96,10 +96,16 @@ CUENTAS BANCARIAS ESEC:
 CUENTAS BANCARIAS INTERPASS:
 - BBVA INTERPASS: Cuenta 0011-0189-0100035765 | CCI: 011-189-000100035765-85
 
-=== INFORMACIÓN LEGAL Y RAZONES SOCIALES ===
-- Razón Social: Escuela Sudamericana de Extensión Cultural para Perú S.A. | RUC: 20428652577
-- Razón Social: Premium Cultural Institute S.A.C. | RUC: 20502705131
-- Razón Social: INTERNATIONAL PASSWORD SYSTEM PERU S.A.C. | RUC: 20523074653
+=== DATOS FISCALES Y RUCs ===
+Cuando el cliente pida el RUC o razón social, proporciona estos datos exactos:
+- Razón Social: Escuela Sudamericana de Extensión Cultural para Perú S.A.
+  RUC: 20428652577
+
+- Razón Social: Premium Cultural Institute S.A.C.  
+  RUC: 20502705131
+
+- Razón Social: INTERNATIONAL PASSWORD SYSTEM PERU S.A.C.
+  RUC: 20523074653
 
 === OFERTAS RELÁMPAGO Y PROMOCIONES ===
 - Oferta Expomina:
