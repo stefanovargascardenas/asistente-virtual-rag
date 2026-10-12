@@ -68,9 +68,9 @@ if not api_key:
 # --- CARGA DEL MODELO Y MANUAL DIRECTO EN EL PROMPT ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
-    # Modelo exacto de versión estable para evitar errores 404 y ampliar cuota a 1500 diarias
+    # Usamos gemini-2.0-flash (modelo oficial con cuota de 1,500 peticiones diarias)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-002",
+        model="gemini-2.0-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -209,14 +209,14 @@ Reglas de respuesta:
 
 Manual completo de la empresa:
 {manual_completo}"""),
-        ("human", "{{input}}")
+        ("human", "{input}")
     ])
 
     return prompt, llm
 
 prompt, llm = cargar_componentes()
 
-# --- GENERADOR DE STREAMING CON ESCUDO DE REINTENTOS ---
+# --- GENERADOR DE STREAMING CON ESCUDO Y REINTENTOS ---
 def stream_con_respaldo(chain, inputs):
     max_intentos = 3
     espera = 2
@@ -233,7 +233,7 @@ def stream_con_respaldo(chain, inputs):
                     espera *= 2
                     continue
                 else:
-                    yield "⚠️ Límite momentáneo alcanzado. Por favor, reintenta en unos segundos."
+                    yield "⚠️ Alta demanda momentánea. Por favor, reintenta en unos segundos."
             else:
                 yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
                 break
