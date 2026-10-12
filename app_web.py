@@ -2,9 +2,7 @@ import os
 import json
 import time
 import streamlit as st
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+import google.generativeai as genai
 
 FAQ_FILE = "faqs.json"
 
@@ -65,17 +63,12 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA DEL MODELO Y MANUAL DIRECTO EN EL PROMPT ---
-@st.cache_resource(show_spinner=False)
-def cargar_componentes():
-    # Usamos gemini-2.0-flash (modelo oficial con cuota de 1,500 peticiones diarias)
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        api_key=api_key,
-        temperature=0.1,
-        streaming=True
-    )
+# Configurar API Key de Google Generative AI
+genai.configure(api_key=api_key)
 
+# --- CARGA DEL MODELO CON GEMINI-1.5-FLASH (1500 PETICIONES/DÍA) ---
+@st.cache_resource(show_spinner=False)
+def cargar_modelo():
     manual_completo = """
 OBJECIONES NIVEL 1
 Objeciones en el filtro
@@ -196,8 +189,7 @@ MENSAJES DE SEGUIMIENTO Y DEFINICIÓN (PLANTILLAS):
 "Hola [Nombre], te saluda Samy Pinto de Premium English Program, solicitaste información sobre nuestro programa de inglés. Déjame saber en qué horario tienes disponible unos minutos para comunicarme."
     """
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", f"""Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
+    system_instruction = f"""Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu función es darle al asesor la información exacta o el guion que necesita de inmediato para la llamada.
 
 Reglas de respuesta:
@@ -208,22 +200,27 @@ Reglas de respuesta:
    - Si es una objeción (ej: "caro", "no escuché antes"), entrega el guion de ventas exacto con su respectiva pregunta de cierre o instrucción si el manual lo indica.
 
 Manual completo de la empresa:
-{manual_completo}"""),
-        ("human", "{input}")
-    ])
+{manual_completo}"""
 
-    return prompt, llm
+    # Inicializar el modelo gemini-1.5-flash usando la SDK oficial
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=system_instruction
+    )
+    return model
 
-prompt, llm = cargar_componentes()
+model = cargar_modelo()
 
-# --- GENERADOR DE STREAMING CON ESCUDO Y REINTENTOS ---
-def stream_con_respaldo(chain, inputs):
+# --- GENERADOR DE STREAMING CON MANEJO DE ERRORES ---
+def generar_respuesta(prompt_texto):
     max_intentos = 3
     espera = 2
     for intento in range(max_intentos):
         try:
-            for chunk in chain.stream(inputs):
-                yield chunk
+            response = model.generate_content(prompt_texto, stream=True)
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
             break
         except Exception as e:
             err_str = str(e)
@@ -233,9 +230,9 @@ def stream_con_respaldo(chain, inputs):
                     espera *= 2
                     continue
                 else:
-                    yield "⚠️ Alta demanda momentánea. Por favor, reintenta en unos segundos."
+                    yield "⚠️ Límite momentáneo alcanzado. Por favor, reintenta en unos segundos."
             else:
-                yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
+                yield f"⚠️ Ocurrió un error con el servicio de Google: {err_str}"
                 break
 
 # --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO ---
@@ -268,9 +265,6 @@ if query_final:
         st.write(query_final)
 
     with st.chat_message("assistant"):
-        chain = prompt | llm | StrOutputParser()
-        inputs = {"input": query_final}
-
-        respuesta_texto = st.write_stream(stream_con_respaldo(chain, inputs))
+        respuesta_texto = st.write_stream(generar_respuesta(query_final))
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
