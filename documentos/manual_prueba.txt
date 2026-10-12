@@ -95,3 +95,28 @@ CUENTAS BANCARIAS ESEC:
 
 CUENTAS BANCARIAS INTERPASS:
 - BBVA INTERPASS: Cuenta 0011-0189-0100035765 | CCI: 011-189-000100035765-85
+
+=== INFORMACIÓN LEGAL Y RAZONES SOCIALES ===
+- Razón Social: Escuela Sudamericana de Extensión Cultural para Perú S.A. | RUC: 20428652577
+- Razón Social: Premium Cultural Institute S.A.C. | RUC: 20502705131
+- Razón Social: INTERNATIONAL PASSWORD SYSTEM PERU S.A.C. | RUC: 20523074653
+
+=== OFERTAS RELÁMPAGO Y PROMOCIONES ===
+- Oferta Expomina:
+Vanessa tenemos una OFERTA RELÁMPAGO ⚡️ 
+ÚLTIMOS CUPOS EXPOMINA🚨
+De S/4500 a S/2500
+✔️ Horarios flexibles
+✔️ Clases personalizadas
+✔️ TOEFL/CAMBRIDGE
+¿Quieres recibir más información?
+
+=== MENSAJES DE SEGUIMIENTO Y DEFINICIÓN (PLANTILLAS) ===
+1. Mensaje de cierre o pausa de prioridad:
+"Hola [Nombre], he estado intentando comunicarme debido a tu interés por mejorar tu inglés. Si en todo caso ya no lo estás viendo como una prioridad, déjame saberlo para retirarte de nuestra base de datos, pues la idea tampoco es incomodarte. Me comentas por favor"
+
+2. Mensaje por falta de contacto previo:
+"Hola [Nombre], he estado intentando comunicarme porque solicitaste información sobre nuestro programa de inglés pero no he podido contactarte. Si en todo caso ya no lo estás viendo como una prioridad, déjame saberlo para retirarte de nuestra base de datos, pues la idea tampoco es incomodarte. Me comentas por favor"
+
+3. Mensaje de contacto inicial (Samy Pinto):
+"Hola [Nombre], te saluda Samy Pinto de Premium English Program, solicitaste información sobre nuestro programa de inglés. Déjame saber en qué horario tienes disponible unos minutos para comunicarme."
