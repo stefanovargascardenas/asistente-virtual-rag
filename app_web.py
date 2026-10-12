@@ -1,7 +1,7 @@
 import os
 import json
+import time
 import streamlit as st
-from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -66,7 +66,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA Y CREACIÓN DE VECTORSTORE EN MEMORIA (IN-MEMORY) ---
+# --- CARGA ESTABLE DE COMPONENTES RAG DESDE DISCO (SIN GASTAR EMBEDDINGS) ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -74,27 +74,11 @@ def cargar_componentes():
         google_api_key=api_key
     )
     
-    path_manual = os.path.join("documentos", "manual_prueba.txt")
-    
-    if os.path.exists(path_manual):
-        with open(path_manual, "r", encoding="utf-8") as f:
-            contenido = f.read()
-        
-        bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
-        documents = [Document(page_content=bloque) for bloque in bloques]
-        
-        # Generar base vectorial 100% en memoria para evitar errores de disco SQLite
-        vectorstore = Chroma.from_documents(
-            documents=documents,
-            embedding=embeddings
-        )
-    else:
-        st.error("⚠️ No se encontró el archivo 'documentos/manual_prueba.txt'.")
-        st.stop()
-
+    # Carga la base de datos persistente existente
+    vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
-    # Modelo oficial gemini-3.8-flash sin fallbacks
+    # Modelo oficial gemini-3.8-flash optimizado
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.8-flash",
         api_key=api_key,
@@ -122,17 +106,27 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
-# --- GENERADOR DE STREAMING CON ESCUDO DE ERRORES ---
+# --- GENERADOR DE STREAMING CON REINTENTO AUTOMÁTICO INTELIGENTE ---
 def stream_con_respaldo(chain, inputs):
-    try:
-        for chunk in chain.stream(inputs):
-            yield chunk
-    except Exception as e:
-        err_str = str(e)
-        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            yield "⚠️ Se alcanzó el límite momentáneo de consultas. Espera unos segundos e intenta nuevamente."
-        else:
-            yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
+    max_intentos = 3
+    espera = 2
+    for intento in range(max_intentos):
+        try:
+            for chunk in chain.stream(inputs):
+                yield chunk
+            break # Si sale bien, termina el bucle
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                if intento < max_intentos - 1:
+                    time.sleep(espera)
+                    espera *= 2 # Espera exponencial (2s, 4s...)
+                    continue
+                else:
+                    yield "⚠️ Alta demanda momentánea en la red. Por favor, reintenta en unos segundos."
+            else:
+                yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
+                break
 
 # --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
