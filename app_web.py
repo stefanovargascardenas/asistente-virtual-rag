@@ -2,7 +2,6 @@ import os
 import json
 import time
 import streamlit as st
-from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -67,7 +66,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA EN MEMORIA (IN-MEMORY): 100% ESTABLE EN LA NUBE ---
+# --- CARGA DESDE LA CARPETA LOCAL CHROMA_DB (CERO GASTO DE EMBEDDINGS) ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -75,25 +74,8 @@ def cargar_componentes():
         google_api_key=api_key
     )
     
-    path_manual = os.path.join("documentos", "manual_prueba.txt")
-    
-    if not os.path.exists(path_manual):
-        st.error("⚠️ No se encontró el archivo 'documentos/manual_prueba.txt'. Asegúrate de subirlo a GitHub.")
-        st.stop()
-        
-    with open(path_manual, "r", encoding="utf-8") as f:
-        contenido = f.read()
-    
-    # Fragmentar por bloques completos (respeta secciones, RUCs y ofertas)
-    bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
-    documents = [Document(page_content=bloque) for bloque in bloques]
-    
-    # Crear la base vectorial 100% en memoria RAM (sin depender de carpetas de disco)
-    vectorstore = Chroma.from_documents(
-        documents=documents,
-        embedding=embeddings
-    )
-
+    # Carga la base de datos persistente ya generada
+    vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     # Modelo oficial gemini-3.8-flash optimizado
@@ -124,7 +106,7 @@ Contexto disponible:
 
 retriever, prompt, llm = cargar_componentes()
 
-# --- GENERADOR DE STREAMING CON REINTENTO AUTOMÁTICO INTELIGENTE ---
+# --- GENERADOR DE STREAMING CON REINTENTO AUTOMÁTICO ---
 def stream_con_respaldo(chain, inputs):
     max_intentos = 3
     espera = 2
