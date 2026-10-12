@@ -67,7 +67,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA ROBUSTA: CREA O CARGA LA DB AUTOMÁTICAMENTE SIN ERRORES ---
+# --- CARGA EN MEMORIA (IN-MEMORY): 100% ESTABLE EN LA NUBE ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -75,28 +75,24 @@ def cargar_componentes():
         google_api_key=api_key
     )
     
-    persist_dir = "chroma_db"
+    path_manual = os.path.join("documentos", "manual_prueba.txt")
     
-    # Si la base de datos no existe en el disco de la nube, la creamos al vuelo desde el manual
-    if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
-        path_manual = os.path.join("documentos", "manual_prueba.txt")
-        if os.path.exists(path_manual):
-            with open(path_manual, "r", encoding="utf-8") as f:
-                contenido = f.read()
-            
-            bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
-            documents = [Document(page_content=bloque) for bloque in bloques]
-            
-            vectorstore = Chroma.from_documents(
-                documents=documents,
-                embedding=embeddings,
-                persist_directory=persist_dir
-            )
-        else:
-            st.error("⚠️ No se encontró el archivo de manual en documentos/manual_prueba.txt")
-            st.stop()
-    else:
-        vectorstore = Chroma(persist_directory=persist_dir, embedding_function=embeddings)
+    if not os.path.exists(path_manual):
+        st.error("⚠️ No se encontró el archivo 'documentos/manual_prueba.txt'. Asegúrate de subirlo a GitHub.")
+        st.stop()
+        
+    with open(path_manual, "r", encoding="utf-8") as f:
+        contenido = f.read()
+    
+    # Fragmentar por bloques completos (respeta secciones, RUCs y ofertas)
+    bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
+    documents = [Document(page_content=bloque) for bloque in bloques]
+    
+    # Crear la base vectorial 100% en memoria RAM (sin depender de carpetas de disco)
+    vectorstore = Chroma.from_documents(
+        documents=documents,
+        embedding=embeddings
+    )
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
