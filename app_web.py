@@ -2,6 +2,7 @@ import os
 import json
 import time
 import streamlit as st
+from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -66,7 +67,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA ESTABLE DE COMPONENTES RAG DESDE DISCO (SIN GASTAR EMBEDDINGS) ---
+# --- CARGA ROBUSTA: CREA O CARGA LA DB AUTOMÁTICAMENTE SIN ERRORES ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -74,8 +75,29 @@ def cargar_componentes():
         google_api_key=api_key
     )
     
-    # Carga la base de datos persistente existente
-    vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
+    persist_dir = "chroma_db"
+    
+    # Si la base de datos no existe en el disco de la nube, la creamos al vuelo desde el manual
+    if not os.path.exists(persist_dir) or not os.listdir(persist_dir):
+        path_manual = os.path.join("documentos", "manual_prueba.txt")
+        if os.path.exists(path_manual):
+            with open(path_manual, "r", encoding="utf-8") as f:
+                contenido = f.read()
+            
+            bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
+            documents = [Document(page_content=bloque) for bloque in bloques]
+            
+            vectorstore = Chroma.from_documents(
+                documents=documents,
+                embedding=embeddings,
+                persist_directory=persist_dir
+            )
+        else:
+            st.error("⚠️ No se encontró el archivo de manual en documentos/manual_prueba.txt")
+            st.stop()
+    else:
+        vectorstore = Chroma(persist_directory=persist_dir, embedding_function=embeddings)
+
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     # Modelo oficial gemini-3.8-flash optimizado
@@ -114,13 +136,13 @@ def stream_con_respaldo(chain, inputs):
         try:
             for chunk in chain.stream(inputs):
                 yield chunk
-            break # Si sale bien, termina el bucle
+            break
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 if intento < max_intentos - 1:
                     time.sleep(espera)
-                    espera *= 2 # Espera exponencial (2s, 4s...)
+                    espera *= 2
                     continue
                 else:
                     yield "⚠️ Alta demanda momentánea en la red. Por favor, reintenta en unos segundos."
