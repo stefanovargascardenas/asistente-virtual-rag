@@ -65,12 +65,11 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA DEL MODELO CON GEMINI-1.5-FLASH Y MANUAL EN PROMPT ---
+# --- CARGA DEL MODELO CON GEMINI-1.5-FLASH-LATEST ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
-    # Modelo oficial gemini-1.5-flash con cuota amplia de 1500 peticiones diarias
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-1.5-flash-latest",  # <--- Nombre exacto reconocido por la API v1beta
         api_key=api_key,
         temperature=0.1,
         streaming=True
