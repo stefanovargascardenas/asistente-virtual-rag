@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import streamlit as st
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -64,11 +65,12 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA DEL MODELO Y MANUAL DIRECTO EN EL PROMPT ---
+# --- CARGA DEL MODELO CON GEMINI-1.5-FLASH Y MANUAL EN PROMPT ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
+    # Modelo oficial gemini-1.5-flash con cuota amplia de 1500 peticiones diarias
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.8-flash",
+        model="gemini-1.5-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
@@ -214,14 +216,27 @@ Manual completo de la empresa:
 
 prompt, llm = cargar_componentes()
 
-# --- GENERADOR DE STREAMING CON DIAGNÓSTICO DE ERROR REAL ---
+# --- GENERADOR DE STREAMING CON ESCUDO DE REINTENTOS ---
 def stream_con_respaldo(chain, inputs):
-    try:
-        for chunk in chain.stream(inputs):
-            yield chunk
-    except Exception as e:
-        # Muestra el error exacto que devuelve Google en lugar de ocultarlo
-        yield f"⚠️ **Error técnico devuelto por Google:** `{str(e)}`"
+    max_intentos = 3
+    espera = 2
+    for intento in range(max_intentos):
+        try:
+            for chunk in chain.stream(inputs):
+                yield chunk
+            break
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                if intento < max_intentos - 1:
+                    time.sleep(espera)
+                    espera *= 2
+                    continue
+                else:
+                    yield "⚠️ Límite momentáneo alcanzado. Por favor, reintenta en unos segundos."
+            else:
+                yield f"⚠️ Ocurrió una microinterrupción con el servicio de Google: {err_str}"
+                break
 
 # --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
