@@ -76,9 +76,9 @@ def cargar_componentes():
     vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    # Modelo principal oficial y ultrarrápido
+    # Usar gemini-2.0-flash para compatibilidad total con la última API de Google
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash",
         api_key=api_key,
         temperature=0.1,
         streaming=True
