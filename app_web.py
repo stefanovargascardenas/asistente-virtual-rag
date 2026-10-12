@@ -1,6 +1,5 @@
 import os
 import json
-import shutil
 import streamlit as st
 from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
@@ -67,7 +66,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA AUTOMÁTICA Y COMPONENTES RAG (GENERA DB AL VUELO) ---
+# --- CARGA Y CREACIÓN DE VECTORSTORE EN MEMORIA (IN-MEMORY) ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -75,31 +74,23 @@ def cargar_componentes():
         google_api_key=api_key
     )
     
-    # Leer el manual directamente desde la carpeta documentos
     path_manual = os.path.join("documentos", "manual_prueba.txt")
+    
     if os.path.exists(path_manual):
         with open(path_manual, "r", encoding="utf-8") as f:
             contenido = f.read()
         
-        # Fragmentar por bloques y crear documentos limpios
         bloques = [bloque.strip() for bloque in contenido.split("\n\n") if bloque.strip()]
         documents = [Document(page_content=bloque) for bloque in bloques]
         
-        persist_dir = "chroma_db"
-        if os.path.exists(persist_dir):
-            try:
-                shutil.rmtree(persist_dir, ignore_errors=True)
-            except Exception:
-                pass
-        
-        # Generar la base vectorial automáticamente en caliente
+        # Generar base vectorial 100% en memoria para evitar errores de disco SQLite
         vectorstore = Chroma.from_documents(
             documents=documents,
-            embedding=embeddings,
-            persist_directory=persist_dir
+            embedding=embeddings
         )
     else:
-        vectorstore = Chroma(persist_directory="chroma_db", embedding_function=embeddings)
+        st.error("⚠️ No se encontró el archivo 'documentos/manual_prueba.txt'.")
+        st.stop()
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
