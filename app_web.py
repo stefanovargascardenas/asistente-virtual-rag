@@ -2,9 +2,7 @@ import os
 import json
 import time
 import streamlit as st
-from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -67,76 +65,9 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Google Gemini en Streamlit Secrets.")
     st.stop()
 
-# --- CARGA EN MEMORIA BLINDADA CONTRA RATE LIMITS ---
+# --- CARGA DEL MODELO Y MANUAL DIRECTO EN EL PROMPT (CERO ERRORES DE DB) ---
 @st.cache_resource(show_spinner=False)
 def cargar_componentes():
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=api_key
-    )
-    
-    # Documentos consolidados en 3 bloques exactos (consumo mínimo de API para evitar bloqueos)
-    docs_manual = [
-        Document(page_content="""OBJECIONES NIVEL 1 Y NIVEL 2:
-        - NO HABÍA ESCUCHADO ANTES DE USTEDES: Premium English tiene 26 años en el mercado, publicidad dirigida a profesionales en EXPOMINA, TECNOSALUD, FERIA DEL LIBRO. ¿Tienes interés en aprender inglés actualmente?
-        - ¿CÓMO TIENES MI NÚMERO?: Diversas bases de datos de empresas y eventos profesionales. ¿Tienes interés en aprender inglés actualmente?
-        - ¿ME PUEDE DEVOLVER LA LLAMADA LUEGO?: Con gusto, ¿me confirmas tu interés actual? Sí: Agendar llamada de 5 min. No: Tachar dato.
-        - MÁNDAME LA INFORMACIÓN POR CORREO O WHATSAPP: Te envío info general, pero tenemos beneficios económicos y clase modelo gratuita. ¿En qué horario tienes 5 minutos libres?
-        - ¿CUÁNTO CUESTA?: Rango de inversión entre S/300 y S/400 según tu nivel. ¿Tienes algún nivel o quieres comenzar de cero?
-        - ME PARECE MUY CARO: ¿Cuál es un monto que puedes manejar mensualmente? S/200-S/250: Tarjeta de crédito para descuento adicional y agendar clase modelo. Menos de S/200: No es el perfil.
-        - ME QUEDA BIEN CUALQUIER PLAN: Si tuvieras que elegir uno ahora, ¿cuál se alinea mejor a tu presupuesto?
-        - TOMO DECISIONES CON ALGUIEN MÁS: Es importante comentarle la propuesta antes de la clase modelo.
-        - ¿PUEDO HACER MÁS DE 4 HORAS?: Extensión opcional de horas adicionales. Con 6 horas sigues el syllabus para lograr el objetivo en 12 meses.
-        - ¿PUEDO HACER LAS 4 HORAS EN UN DÍA?: Ideal distribuir en 3 días por rendimiento cerebral, pero manejable como excepción.
-        - ¿LOS PROFESORES SON NATIVOS?: Sí, desde el módulo intermedio en adelante para evitar inseguridad inicial.
-        - ¿QUÉ DIFERENCIA TU PROGRAMA?: Flexibilidad de horarios (ingresar solo una hora antes) y seguimiento/asesoría constante post-matrícula.
-        - ¿QUIÉN ME GARANTIZA QUE VOY A APRENDER?: El alumno cumpliendo las 6 horas. Damos opción de repetir clases no comprendidas.
-        - CLASE SIN COMPROMISO: La clase es para vivir la experiencia antes de inscribirte. ¿Estamos de acuerdo?"""),
-        
-        Document(page_content="""PLANES DE INVERSIÓN Y PRECIOS:
-        - Opción Contado 1: Matrícula S/ 3600 (Total: S/ 3600).
-        - Opción Contado 2: Matrícula S/ 3990 (Total: S/ 3990).
-        - Plan 2 Cuotas: Matrícula S/ 1900 + 2 cuotas de S/ 1200 (Total: S/ 4300).
-        - Plan 4 Cuotas: Matrícula S/ 1400 + 4 cuotas de S/ 800 (Total: S/ 4600).
-        - Plan 10 Cuotas: Matrícula S/ 1250 + 10 cuotas de S/ 350 (Total: S/ 4750).
-        PLANES INHOUSE:
-        - Contado Inhouse: Matrícula S/ 6500 (Total: S/ 6500).
-        - Plan 2 Cuotas Inhouse: Matrícula S/ 2550 + 3 cuotas de S/ 1600 (Total: S/ 7350).
-        - Plan 4 Cuotas Inhouse: Matrícula S/ 1850 + 6 cuotas de S/ 1100 (Total: S/ 8450)."""),
-        
-        Document(page_content="""LINKS DE PAGO, CUENTAS BANCARIAS Y DATOS FISCALES (RUC):
-        LINKS ESEC:
-        - Niubiz BBVA/Diners: https://pagolink.niubiz.com.pe/pagoseguro/ESECPERU/3250291
-        - Mercado Pago BCP/Interbank: https://link.mercadopago.com.pe/premiumenglishprogra
-        - Mercado Pago S/ 3600: https://mpago.la/2mgU3Bk
-        - Mercado Pago S/ 3990: https://mpago.la/2JapmHy
-        LINKS INTERPASS:
-        - Niubiz S/ 2500: https://pagolink.niubiz.com.pe/pagoseguro/PREMIUMENGLISHPROGRAM/722304
-        - Mercado Pago S/ 2500: https://mpago.la/1mLXnoU
-        CUENTAS ESEC:
-        - BBVA ESEC: 0011-0355-0100001919 | CCI: 011-355-000100001919-58
-        - BCP ESEC: 194-1927206-0-26 | CCI: 002-194-001927206026-90
-        - INTERBANK ESEC: 067-3000004152 | CCI: 003-067-003000004152-62
-        - YAPE ESEC (Máx 500): 962911799
-        CUENTAS INTERPASS:
-        - BBVA INTERPASS: 0011-0189-0100035765 | CCI: 011-189-000100035765-85
-        DATOS FISCALES Y RUCs:
-        1. Razón Social: Escuela Sudamericana de Extensión Cultural para Perú S.A. | RUC: 20428652577
-        2. Razón Social: Premium Cultural Institute S.A.C. | RUC: 20502705131
-        3. Razón Social: INTERNATIONAL PASSWORD SYSTEM PERU S.A.C. | RUC: 20523074653
-        OFERTA EXPOMINA: De S/4500 a S/2500 con horarios flexibles, clases personalizadas, TOEFL/CAMBRIDGE.
-        PLANTILLAS DE SEGUIMIENTO: Cierre/pausa, falta de contacto, contacto inicial de Samy Pinto.""")
-    ]
-    
-    # Crear base vectorial 100% en memoria RAM sin carpetas físicas
-    vectorstore = Chroma.from_documents(
-        documents=docs_manual,
-        embedding=embeddings
-    )
-
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
-
-    # Modelo oficial gemini-3.8-flash optimizado
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.8-flash",
         api_key=api_key,
@@ -144,25 +75,146 @@ def cargar_componentes():
         streaming=True
     )
 
+    # El manual completo va integrado aquí para máxima velocidad y estabilidad
+    manual_completo = """
+OBJECIONES NIVEL 1
+Objeciones en el filtro
+
+NO HABÍA ESCUCHADO ANTES DE USTEDES
+Comprendo nombre, Premium English tiene 26 años en el mercado, sin embargo, no manejamos publicidad masiva sino dirigida directamente a nuestro público objetivos que son profesionales y la mejor forma de llegar a ellos es través de eventos como EXPOMINA, TECNOSALUD, LA FERIA DE LIBRO, donde siempre participamos. La idea no es incomodarte, en todo caso coméntame nombre ¿tienes un interés en aprender inglés actualmente?
+
+¿CÓMO TIENES MI NÚMERO?
+Manejamos diversas bases de datos correspondientes a diferentes empresas y eventos profesionales, seguro participaste en alguno de ellos. Ahora nombre, la idea no es incomodarte, en todo caso coméntame ¿tienes un interés en aprender inglés actualmente?
+
+¿ME PUEDE DEVOLVER LA LLAMADA LUEGO?
+Con mucho gusto, pero como la idea no es incomodarte nombre, ¿me confirmas tu interés actual por aprender inglés? 
+Sí: Agendar horario para la segunda llamada, reforzar que es una llamada breve “de 5 minutos”. No: Tachar dato (no interesado)
+
+MANDAME LA INFORMACIÓN POR CORREO O A MI WHATSAPP Y YO ME COMUNICO
+Claro que sí, te envío información general para que conozcas más de la empresa y del programa; sin embargo, te comento que estamos manejando beneficios en la parte económica e incluso una opción de darte una clase modelo gratuita para que antes de tomar cualquier decisión puedas vivir la experiencia con nosotros. 
+La idea es explicarte en qué consisten estos beneficios y como puedes llevar el programa de forma más personalizada. En todo caso, ¿en qué horario tienes unos 5 minutos libres para agendarte?
+*Evitar mandar información sin previa conversación. NO HAY RETORNO.
+
+¿CUÁNTO CUESTA? (en un momento que no corresponde en el telemercadeo)
+Nombre nuestros planes tienen un rango de inversión entre S/300 y S/400, va a depender mucho del nivel en el que estés, cuéntame, tienes algún nivel o quieres comenzar de cero?
+(la pregunta debe buscar retomar la estructura del telemercadeo)
+
+ME PARECE MUY CARO (continuación de ¿CUANTO CUESTA?)
+Comprendo nombre, para ver que opciones darte, ¿cuál es un monto que puedes manejar mensualmente que no afecte tu presupuesto?
+S/200 – S/250: preguntar si tiene alguna tarjeta de crédito “porque tenemos algunos beneficios adicionales”. Si tiene, agendar clase modelo y comprometerse a ayudarlo con un descuento adicional.
+Menos de S/200: Enviar información y quedar bien con el alumno. NO ES EL PERFIL QUE BUSCAMOS.
+
+“ME QUEDA BIEN CUALQUIERA DE LOS PLANES” (no elije uno)
+Excelente nombre, pero si tuvieras que elegir uno ahora, ¿cuál se alinea mejor a tu presupuesto?
+*Si no elije uno probablemente no se le acomode ninguno realmente.
+
+“TOMO LAS DECISIONES CON ALGUIEN MÁS” (no autonomía)
+Comprendo nombre, en ese caso es importante que puedas comentarle la propuesta para que conversen sobre el tema antes de la clase modelo.
+
+OBJECIONES NIVEL 2
+
+¿PUEDO HACER MÁS DE CUATRO HORAS?
+Por supuesto, te damos una extensión de horas adicionales opcionales. Entonces si tienes disponibilidad de tiempo y quieres hacer más horas no hay problema, de igual forma te damos la tranquilidad que con 6 horas estás siguiendo el orden del syllabus para lograr el objetivo en el tiempo indicado (12 meses).
+
+¿PUEDO HACER LAS CUATRO HORAS EN UN DÍA?
+Lo ideal es que puedas distribuir las 6 horas al menos en tres días, porque en un solo día no es pedagógicamente recomendable, está comprobando que el cerebro toma atención las primeras dos horas, la tercera puedes estar ahí pero probablemente tu mente ya está pensando en otras cosas. Pero si se trata de una excepción, es manejable, lo podemos conversar, la idea es apoyarte para que tengas constancia en tus clases.
+
+¿LOS PROFESORES SON NATIVOS?
+Sí, contamos con profesores nativos para el módulo de intermedio en adelante donde el alumno ya se adaptó; inicialmente trabajábamos con profesores nativos desde las primeras unidades, pero esto resultó contraproducente porque generaba inseguridad y miedo en los alumnos.
+
+¿QUÉ DIFERENCIA TU PROGRAMA CON EL RESTO?
+En realidad, eso depende de con quién nos compares, si se trata de un sistema tradicional; por ejemplo, Icpna, británico o Euroidiomas la diferencia es abismal, en cuanto a la flexibilidad de horarios, número de personas en aula, público objetivo…
+Si nos comparas con sistemas de avanzada como Wall Street, Berlitz, Open English, la diferencia está en detalles; por ejemplo, el manejo de los horarios: todos son flexibles y tú puedes elegir en qué horario ingresar, pero en algunos institutos con un día o hasta con una semana de anticipación y con nosotros solamente una hora antes.
+Pero, sobre todo, la diferencia principal está en el servicio que recibes después de matricularte, hablamos de seguimiento y asesoría constante.
+
+¿QUIÉN ME GARANTIZA QUE VOY A APRENDER?
+La garantía de las instituciones educativas como universidades e institutos siempre será el propio alumno. Por ejemplo, el programa puede ser espectacular, pero si tú no cumples con las seis horas a la semana no lograrás el resultado que esperas porque no es un programa mágico.
+Sin embargo, buscando garantizar tu aprendizaje, te damos la opción de repetir clases que no hayan sido comprendidas en un 100% con la finalidad de que no estés pasando por pasar, sino realmente aprendiendo. ¿Qué mejor garantía que esa? Es algo que ninguna otra institución te dará.
+
+LA CLASE ES SIN COMPROMISO, ¿CIERTO?
+El único compromiso es el de tu decisión, la idea de la clase es que además de la información que te estoy facilitando puedas vivir la experiencia con nosotros antes de matricularte. Si la clase no te gusta, simplemente quedamos en buenos términos y ya te diste la oportunidad de conocer una nueva alternativa. Pero si todo se te acomoda en cuanto a horarios, duración y metodología y, además de eso, la clase cubre tus expectativas te doy la cordial bienvenida a la institución y liberamos tu cupo académico mediante tu inscripción. ¿Estamos de acuerdo?
+
+PLANES DE INVERSIÓN
+
+PLANES REGULARES / GENERALES:
+- Opción Contado 1: Matrícula S/ 3600 (Total: S/ 3600).
+- Opción Contado 2: Matrícula S/ 3990 (Total: S/ 3990).
+- Plan 2 Cuotas: Matrícula S/ 1900 + 2 cuotas de S/ 1200 cada una (Total: S/ 4300).
+- Plan 4 Cuotas: Matrícula S/ 1400 + 4 cuotas de S/ 800 cada una (Total: S/ 4600).
+- Plan 10 Cuotas: Matrícula S/ 1250 + 10 cuotas de S/ 350 cada una (Total: S/ 4750).
+
+PLANES INHOUSE:
+- Contado Inhouse: Matrícula S/ 6500 (Total: S/ 6500).
+- Plan 2 Cuotas Inhouse: Matrícula S/ 2550 + 3 cuotas de S/ 1600 cada una (Total: S/ 7350).
+- Plan 4 Cuotas Inhouse: Matrícula S/ 1850 + 6 cuotas de S/ 1100 cada una (Total: S/ 8450).
+
+LINKS DE PAGO Y CUENTAS BANCARIAS
+
+LINKS DE PAGO ESEC:
+- Niubiz BBVA / Diners (Sin Monto): https://pagolink.niubiz.com.pe/pagoseguro/ESECPERU/3250291
+- Mercado Pago BCP / Interbank (Sin Monto): https://link.mercadopago.com.pe/premiumenglishprogra
+- Mercado Pago (Monto S/ 3600): https://mpago.la/2mgU3Bk
+- Mercado Pago (Monto S/ 3990): https://mpago.la/2JapmHy
+
+LINKS DE PAGO INTERPASS:
+- Niubiz BBVA / Diners (Monto S/ 2500): https://pagolink.niubiz.com.pe/pagoseguro/PREMIUMENGLISHPROGRAM/722304
+- Mercado Pago BCP / Interbank (Monto S/ 2500): https://mpago.la/1mLXnoU
+
+CUENTAS BANCARIAS ESEC:
+- BBVA ESEC: Cuenta 0011-0355-0100001919 | CCI: 011-355-000100001919-58
+- BCP ESEC: Cuenta 194-1927206-0-26 | CCI: 002-194-001927206026-90
+- INTERBANK ESEC: Cuenta 067-3000004152 | CCI: 003-067-003000004152-62
+- YAPE ESEC (Máximo 500 soles): 962911799
+
+CUENTAS BANCARIAS INTERPASS:
+- BBVA INTERPASS: Cuenta 0011-0189-0100035765 | CCI: 011-189-000100035765-85
+
+DATOS FISCALES Y RUCs:
+- Razón Social: Escuela Sudamericana de Extensión Cultural para Perú S.A.
+  RUC: 20428652577
+- Razón Social: Premium Cultural Institute S.A.C.  
+  RUC: 20502705131
+- Razón Social: INTERNATIONAL PASSWORD SYSTEM PERU S.A.C.
+  RUC: 20523074653
+
+OFERTAS RELÁMPAGO Y PROMOCIONES:
+- Oferta Expomina:
+Vanessa tenemos una OFERTA RELÁMPAGO ⚡️ 
+ÚLTIMOS CUPOS EXPOMINA🚨
+De S/4500 a S/2500
+✔️ Horarios flexibles
+✔️ Clases personalizadas
+✔️ TOEFL/CAMBRIDGE
+¿Quieres recibir más información?
+
+MENSAJES DE SEGUIMIENTO Y DEFINICIÓN (PLANTILLAS):
+1. Mensaje de cierre o pausa de prioridad:
+"Hola [Nombre], he estado intentando comunicarme debido a tu interés por mejorar tu inglés. Si en todo caso ya no lo estás viendo como una prioridad, déjame saberlo para retirarte de nuestra base de datos, pues la idea tampoco es incomodarte. Me comentas por favor"
+2. Mensaje por falta de contacto previo:
+"Hola [Nombre], he estado intentando comunicarme porque solicitaste información sobre nuestro programa de inglés pero no he podido contactarte. Si en todo caso ya no lo estás viendo como una prioridad, déjame saberlo para retirarte de nuestra base de datos, pues la idea tampoco es incomodarte. Me comentas por favor"
+3. Mensaje de contacto inicial (Samy Pinto):
+"Hola [Nombre], te saluda Samy Pinto de Premium English Program, solicitaste información sobre nuestro programa de inglés. Déjame saber en qué horario tienes disponible unos minutos para comunicarme."
+    """
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
+        ("system", f"""Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu función es darle al asesor la información exacta o el guion que necesita de inmediato para la llamada.
 
 Reglas de respuesta:
 1. **Directo y sin rodeos:** Responde ÚNICAMENTE con los datos solicitados (como RUCs, razones sociales, cuentas bancarias, links, precios) o el guion exacto que debe leer el asesor. Jamás agregues saludos ni introducciones como "Dile esto:".
-2. **Fidelidad al manual:** Utiliza la información textual exacta que figura en el contexto.
+2. **Fidelidad al manual:** Utiliza la información textual exacta que figura en el manual proporcionado abajo.
 3. **Versatilidad según la consulta:** 
    - Si piden un dato puntual (ej: "RUC", "cuenta", "oferta expomina", "planes"), entrégalo limpio y ordenado tal como figura en el manual.
    - Si es una objeción (ej: "caro", "no escuché antes"), entrega el guion de ventas exacto con su respectiva pregunta de cierre o instrucción si el manual lo indica.
 
-Contexto disponible:
-{context}"""),
-        ("human", "{input}")
+Manual completo de la empresa:
+{manual_completo}"""),
+        ("human", "{{input}}")
     ])
 
-    return retriever, prompt, llm
+    return prompt, llm
 
-retriever, prompt, llm = cargar_componentes()
+prompt, llm = cargar_componentes()
 
 # --- GENERADOR DE STREAMING CON REINTENTO AUTOMÁTICO ---
 def stream_con_respaldo(chain, inputs):
@@ -216,11 +268,8 @@ if query_final:
         st.write(query_final)
 
     with st.chat_message("assistant"):
-        docs = retriever.invoke(query_final)
-        contexto = "\n\n".join([doc.page_content for doc in docs])
-
         chain = prompt | llm | StrOutputParser()
-        inputs = {"context": contexto, "input": query_final}
+        inputs = {"input": query_final}
 
         respuesta_texto = st.write_stream(stream_con_respaldo(chain, inputs))
 
