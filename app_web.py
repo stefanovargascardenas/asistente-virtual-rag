@@ -66,7 +66,7 @@ if not api_key:
 # Configurar API Key de Google Generative AI
 genai.configure(api_key=api_key)
 
-# --- CARGA DEL MODELO CON GEMINI-1.5-FLASH (1500 PETICIONES/DÍA) ---
+# --- CARGA DEL MODELO CON ALIAS ACTUALIZADO ---
 @st.cache_resource(show_spinner=False)
 def cargar_modelo():
     manual_completo = """
@@ -202,9 +202,9 @@ Reglas de respuesta:
 Manual completo de la empresa:
 {manual_completo}"""
 
-    # Inicializar el modelo gemini-1.5-flash usando la SDK oficial
+    # Usar gemini-1.5-flash-latest
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name="gemini-1.5-flash-latest",
         system_instruction=system_instruction
     )
     return model
