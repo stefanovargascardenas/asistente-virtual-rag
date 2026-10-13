@@ -66,9 +66,9 @@ if not api_key:
 # Configurar API Key de Google Generative AI
 genai.configure(api_key=api_key)
 
-# --- CARGA DEL MODELO CON ALIAS ACTUALIZADO ---
+# --- CARGA DEL MODELO CON AUTO-FALLBACK ---
 @st.cache_resource(show_spinner=False)
-def cargar_modelo():
+def obtener_instruccion_sistema():
     manual_completo = """
 OBJECIONES NIVEL 1
 Objeciones en el filtro
@@ -189,7 +189,7 @@ MENSAJES DE SEGUIMIENTO Y DEFINICIÓN (PLANTILLAS):
 "Hola [Nombre], te saluda Samy Pinto de Premium English Program, solicitaste información sobre nuestro programa de inglés. Déjame saber en qué horario tienes disponible unos minutos para comunicarme."
     """
 
-    system_instruction = f"""Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
+    return f"""Eres un copiloto de telemercadeo en tiempo real para el equipo de ventas de Premium English.
 Tu función es darle al asesor la información exacta o el guion que necesita de inmediato para la llamada.
 
 Reglas de respuesta:
@@ -202,38 +202,46 @@ Reglas de respuesta:
 Manual completo de la empresa:
 {manual_completo}"""
 
-    # Usar gemini-1.5-flash-latest
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash-latest",
-        system_instruction=system_instruction
-    )
-    return model
+# LISTA DE MODELOS A PROBAR EN ORDEN
+MODELOS_CANDIDATOS = [
+    "gemini-2.5-flash",
+    "gemini-3.8-flash"
+]
 
-model = cargar_modelo()
-
-# --- GENERADOR DE STREAMING CON MANEJO DE ERRORES ---
+# --- GENERADOR CON AUTO-FALLBACK ENTRE MODELOS ---
 def generar_respuesta(prompt_texto):
-    max_intentos = 3
-    espera = 2
-    for intento in range(max_intentos):
+    sys_inst = obtener_instruccion_sistema()
+    
+    for nombre_modelo in MODELOS_CANDIDATOS:
         try:
+            model = genai.GenerativeModel(
+                model_name=nombre_modelo,
+                system_instruction=sys_inst
+            )
             response = model.generate_content(prompt_texto, stream=True)
+            
+            exito = False
             for chunk in response:
                 if chunk.text:
+                    exito = True
                     yield chunk.text
-            break
+            
+            if exito:
+                return  # Terminó con éxito, salir
+                
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                if intento < max_intentos - 1:
-                    time.sleep(espera)
-                    espera *= 2
-                    continue
-                else:
-                    yield "⚠️ Límite momentáneo alcanzado. Por favor, reintenta en unos segundos."
+            # Si el modelo da 404 o no existe, el ciclo pasa automáticamente al siguiente candidato
+            if "404" in err_str or "not found" in err_str.lower():
+                continue
+            elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                yield "⚠️ Se alcanzó el límite de cuota gratuita para este modelo. Considera activar Pay-As-You-Go en Google AI Studio o usar otra API Key."
+                return
             else:
-                yield f"⚠️ Ocurrió un error con el servicio de Google: {err_str}"
-                break
+                yield f"⚠️ Error con {nombre_modelo}: {err_str}"
+                return
+
+    yield "⚠️ Ninguno de los modelos configurados respondió. Verifica el estado de tu API Key en Google AI Studio."
 
 # --- SECCIÓN DE BOTONES DE ACCESO RÁPIDO ---
 st.markdown("##### 💡 **Consultas más frecuentes (haz clic para guion rápido):**")
