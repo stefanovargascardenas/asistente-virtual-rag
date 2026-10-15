@@ -210,10 +210,10 @@ Manual completo de la empresa:
 
 model = cargar_modelo()
 
-# --- GENERADOR DE RESPUESTA CON PROTECCIÓN ANTISATURACIÓN (REINTENTOS INTELIGENTES) ---
+# --- GENERADOR DE RESPUESTA CON PROTECCIÓN CONTRA ERRORES 429 Y 503 ---
 def generar_respuesta(prompt_texto):
     max_intentos = 3
-    espera = 3
+    espera = 2
     for intento in range(max_intentos):
         try:
             response = model.generate_content(prompt_texto, stream=True)
@@ -223,13 +223,14 @@ def generar_respuesta(prompt_texto):
             break
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            # Maneja tanto la saturación de cuota (429) como la sobrecarga temporal del servidor de Google (503)
+            if any(k in err_str for k in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "high demand"]):
                 if intento < max_intentos - 1:
                     time.sleep(espera)
                     espera *= 2
                     continue
                 else:
-                    yield "⚠️ El sistema está recibiendo muchas consultas seguidas. Espera unos segundos y vuelve a consultar."
+                    yield "⚠️ El servicio experimentó una alta demanda momentánea. Por favor, reintenta en un par de segundos."
             else:
                 yield f"⚠️ Ocurrió un error con el servicio: {err_str}"
                 break
