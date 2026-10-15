@@ -202,7 +202,6 @@ Reglas de respuesta:
 Manual completo de la empresa:
 {manual_completo}"""
 
-    # Usar gemini-3.6-flash tal como indicó el correo oficial de Google
     model = genai.GenerativeModel(
         model_name="gemini-3.6-flash",
         system_instruction=system_instruction
@@ -211,10 +210,10 @@ Manual completo de la empresa:
 
 model = cargar_modelo()
 
-# --- GENERADOR DE RESPUESTA CON STREAMING Y MANEJO DE ERRORES ---
+# --- GENERADOR DE RESPUESTA CON PROTECCIÓN ANTISATURACIÓN (REINTENTOS INTELIGENTES) ---
 def generar_respuesta(prompt_texto):
     max_intentos = 3
-    espera = 2
+    espera = 3
     for intento in range(max_intentos):
         try:
             response = model.generate_content(prompt_texto, stream=True)
@@ -230,7 +229,7 @@ def generar_respuesta(prompt_texto):
                     espera *= 2
                     continue
                 else:
-                    yield "⚠️ Límite de cuota alcanzado temporalmente. Por favor, reintenta en unos segundos."
+                    yield "⚠️ El sistema está recibiendo muchas consultas seguidas. Espera unos segundos y vuelve a consultar."
             else:
                 yield f"⚠️ Ocurrió un error con el servicio: {err_str}"
                 break
